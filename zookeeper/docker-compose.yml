@@ -12,6 +12,11 @@ services:
       ZOOKEEPER_INIT_LIMIT: 5
       ZOOKEEPER_SYNC_LIMIT: 2
       ZOOKEEPER_SERVERS: zookeeper-1:22888:23888;zookeeper-2:32888:33888;zookeeper-3:42888:43888
+    healthcheck:
+      test: echo stat | nc localhost 22181
+      interval: 10s
+      timeout: 10s
+      retries: 3
 
   zookeeper-2:
     image: confluentinc/cp-zookeeper:latest
@@ -24,6 +29,11 @@ services:
       ZOOKEEPER_INIT_LIMIT: 5
       ZOOKEEPER_SYNC_LIMIT: 2
       ZOOKEEPER_SERVERS: zookeeper-1:22888:23888;zookeeper-2:32888:33888;zookeeper-3:42888:43888
+    healthcheck:
+      test: echo stat | nc localhost 32181
+      interval: 10s
+      timeout: 10s
+      retries: 3
 
   zookeeper-3:
     image: confluentinc/cp-zookeeper:latest
@@ -36,4 +46,9 @@ services:
       ZOOKEEPER_INIT_LIMIT: 5
       ZOOKEEPER_SYNC_LIMIT: 2
       ZOOKEEPER_SERVERS: zookeeper-1:22888:23888;zookeeper-2:32888:33888;zookeeper-3:42888:43888
+    healthcheck:
+      test: echo stat | nc localhost 42181
+      interval: 10s
+      timeout: 10s
+      retries: 3
 
