@@ -54,6 +54,19 @@ profiles_for() {
   esac
 }
 
+# Names must be checked here, in the main shell: profiles_for runs inside a
+# process substitution below, where die() can only kill the subshell — an
+# unknown component would otherwise silently expand to no profiles at all.
+validate_components() {
+  local component
+  for component in "$@"; do
+    case "$component" in
+      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|all) ;;
+      *) die "unknown component '$component' (valid: ${COMPONENTS[*]} all)" ;;
+    esac
+  done
+}
+
 # Turns component names into a deduplicated --profile argument list.
 profile_args() {
   local -a wanted=()
@@ -118,6 +131,7 @@ init_targets() {
 cmd_up() {
   local -a components=("$@")
   if [[ ${#components[@]} -eq 0 ]]; then components=(all); fi
+  validate_components "${components[@]}"
   note "starting: ${components[*]}"
   compose_for "${components[*]}" up -d
   note "state"
@@ -153,6 +167,7 @@ cmd_restart() {
 cmd_build() {
   local -a components=("$@")
   if [[ ${#components[@]} -eq 0 ]]; then components=(hive hbase spark); fi
+  validate_components "${components[@]}"
   local component target
   local -a targets=()
   for component in "${components[@]}"; do
@@ -178,7 +193,8 @@ cmd_pull() {
 
 cmd_init() {
   local -a components=("$@")
-  [[ $# -eq 0 ]] && components=("${COMPONENTS[@]}")
+  if [[ ${#components[@]} -eq 0 ]]; then components=("${COMPONENTS[@]}"); fi
+  validate_components "${components[@]}"
   local component target
   for component in "${components[@]}"; do
     for target in $(init_targets "$component"); do
@@ -190,15 +206,18 @@ cmd_init() {
 
 check() {
   local label="$1"; shift
+  local output
   printf '  %-34s' "$label"
   if output=$("$@" 2>&1); then
     printf 'ok\n'
-    [[ -n "${SMOKE_VERBOSE:-}" ]] && sed 's/^/      /' <<<"$output"
+    if [[ -n "${SMOKE_VERBOSE:-}" ]]; then sed 's/^/      /' <<<"$output"; fi
   else
     printf 'FAILED\n'
     sed 's/^/      /' <<<"$output"
     SMOKE_FAILED=1
   fi
+  # Explicit: a non-zero return here would trip `set -e` in the caller.
+  return 0
 }
 
 smoke_zookeeper() {
@@ -253,7 +272,8 @@ sys.exit(0 if alive else 1)'
 
 cmd_smoke() {
   local -a components=("$@")
-  [[ $# -eq 0 ]] && components=("${COMPONENTS[@]}")
+  if [[ ${#components[@]} -eq 0 ]]; then components=("${COMPONENTS[@]}"); fi
+  validate_components "${components[@]}"
   SMOKE_FAILED=0
   local component
   for component in "${components[@]}"; do
