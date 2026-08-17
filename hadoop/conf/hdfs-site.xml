@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+
+  <property>
+    <name>dfs.namenode.rpc-address</name>
+    <value>namenode:8020</value>
+  </property>
+  <property>
+    <name>dfs.namenode.http-address</name>
+    <value>0.0.0.0:9870</value>
+  </property>
+
+  <!-- Must match HDFS_NAME_DIR / HDFS_DATA_DIR in the Dockerfile: the
+       entrypoint decides whether to format based on the first of these. -->
+  <property>
+    <name>dfs.namenode.name.dir</name>
+    <value>/opt/hadoop/dfs/name</value>
+  </property>
+  <property>
+    <name>dfs.datanode.data.dir</name>
+    <value>/opt/hadoop/dfs/data</value>
+  </property>
+
+  <!-- Tied to the number of datanode containers docker-compose.yml starts.
+       Change both together. -->
+  <property>
+    <name>dfs.replication</name>
+    <value>2</value>
+  </property>
+
+  <property>
+    <name>dfs.webhdfs.enabled</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>dfs.namenode.datanode.registration.ip-hostname-check</name>
+    <value>false</value>
+    <description>container IPs rarely have matching reverse DNS</description>
+  </property>
+
+  <!-- This is a lab platform: reconciling file ownership across the Hive,
+       HBase and Spark containers is more trouble than it is worth. Turn this
+       back on before pointing real users at it. -->
+  <property>
+    <name>dfs.permissions.enabled</name>
+    <value>false</value>
+  </property>
+
+</configuration>

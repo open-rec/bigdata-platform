@@ -6,8 +6,12 @@
 # current release, so a pinned older version would 404 there after the next
 # HBase release.
 #
-# The role (master / regionserver / thrift / rest) is chosen at runtime with
-# HBASE_ROLE — see entrypoint.sh.
+# One image, four roles, given as the container's argument (see entrypoint.sh):
+#
+#   docker build -t openrec/hbase:2.5.10 ./hbase
+#   docker run -d --name hbase-master -p 16010:16010 openrec/hbase:2.5.10 master
+#   docker run -d --name hbase-rs-1 openrec/hbase:2.5.10 regionserver
+#   docker run --rm -it openrec/hbase:2.5.10 hbase shell
 # ---------------------------------------------------------------------------
 
 ARG HBASE_JDK_IMAGE=eclipse-temurin:11-jre-jammy
@@ -43,3 +47,4 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 EXPOSE 16000 16010 16020 16030 9090 9095
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["master"]

@@ -11,18 +11,18 @@
 #   ./platform.sh ps
 #   ./platform.sh logs [service...]
 #   ./platform.sh restart [service...]
-#   ./platform.sh build [component...]  only hive / hbase / spark are built
+#   ./platform.sh build [component...]  every component has its own Dockerfile
 #   ./platform.sh pull
 #   ./platform.sh init [component...]   re-run the bootstrap one-shots
 #   ./platform.sh smoke [component...]  verify what is running
-#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark
+#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|redis|es
 #   ./platform.sh config                resolved compose config
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark)
+readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark redis elasticsearch)
 
 # --- docker compose v2 / v1 ------------------------------------------------
 if docker compose version >/dev/null 2>&1; then
@@ -49,6 +49,8 @@ profiles_for() {
     hive)      echo "hdfs yarn hive" ;;
     hbase)     echo "zookeeper hdfs hbase" ;;
     spark)     echo "hdfs spark" ;;
+    redis)     echo "redis" ;;
+    elasticsearch) echo "elasticsearch" ;;
     all)       echo "${COMPONENTS[*]}" ;;
     *)         die "unknown component '$1' (valid: ${COMPONENTS[*]} all)" ;;
   esac
@@ -61,10 +63,25 @@ validate_components() {
   local component
   for component in "$@"; do
     case "$component" in
-      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|all) ;;
+      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|redis|elasticsearch|all) ;;
       *) die "unknown component '$component' (valid: ${COMPONENTS[*]} all)" ;;
     esac
   done
+}
+
+# Expands the convenience aliases so every other function only ever sees
+# canonical component names.
+normalize_components() {
+  local component
+  for component in "$@"; do
+    case "$component" in
+      es)      echo "elasticsearch" ;;
+      storage) echo "redis"; echo "elasticsearch" ;;
+      all)     printf '%s\n' "${COMPONENTS[@]}" ;;
+      *)       echo "$component" ;;
+    esac
+  # Order-preserving dedupe: 'storage redis' must not process redis twice.
+  done | awk '!seen[$0]++'
 }
 
 # Turns component names into a deduplicated --profile argument list.
@@ -107,13 +124,21 @@ running() {
   [[ -n "$(compose ps -q "$1" 2>/dev/null)" ]]
 }
 
-# Services built from a Dockerfile, per component.
+# One service per component is enough to build its image: every role of a
+# component (namenode/datanode/init, master/worker/thrift, ...) runs the same
+# image, so building a second one would just hit the cache.
 build_targets() {
   case "$1" in
-    hive)  echo "hive-metastore hiveserver2 hive-schema-init hive-libs-init" ;;
-    hbase) echo "hbase-master hbase-regionserver-1 hbase-regionserver-2 hbase-thrift" ;;
-    spark) echo "spark-master spark-worker-1 spark-worker-2 spark-history jupyterlab" ;;
-    *)     echo "" ;;
+    zookeeper)     echo "zookeeper-1" ;;
+    kafka)         echo "kafka-1" ;;
+    hdfs)          echo "namenode" ;;
+    yarn)          echo "resourcemanager" ;;
+    hive)          echo "hive-metastore" ;;
+    hbase)         echo "hbase-master" ;;
+    spark)         echo "spark-master" ;;
+    redis)         echo "redis" ;;
+    elasticsearch) echo "elasticsearch" ;;
+    *)             echo "" ;;
   esac
 }
 
@@ -129,8 +154,10 @@ init_targets() {
 
 # --- commands --------------------------------------------------------------
 cmd_up() {
-  local -a components=("$@")
-  if [[ ${#components[@]} -eq 0 ]]; then components=(all); fi
+  local -a requested=("$@")
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(all); fi
+  local -a components=()
+  mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
   note "starting: ${components[*]}"
   compose_for "${components[*]}" up -d
@@ -165,8 +192,10 @@ cmd_restart() {
 }
 
 cmd_build() {
-  local -a components=("$@")
-  if [[ ${#components[@]} -eq 0 ]]; then components=(hive hbase spark); fi
+  local -a requested=("$@")
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(all); fi
+  local -a components=()
+  mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
   local component target
   local -a targets=()
@@ -176,7 +205,7 @@ cmd_build() {
     done
   done
   if [[ ${#targets[@]} -eq 0 ]]; then
-    note "nothing to build for: ${components[*]} (only hive, hbase and spark are built locally)"
+    note "nothing to build for: ${components[*]}"
     return 0
   fi
   note "building images for: ${components[*]}"
@@ -192,8 +221,10 @@ cmd_pull() {
 }
 
 cmd_init() {
-  local -a components=("$@")
-  if [[ ${#components[@]} -eq 0 ]]; then components=("${COMPONENTS[@]}"); fi
+  local -a requested=("$@")
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=("${COMPONENTS[@]}"); fi
+  local -a components=()
+  mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
   local component target
   for component in "${components[@]}"; do
@@ -230,9 +261,9 @@ smoke_zookeeper() {
 
 smoke_kafka() {
   check "kafka topics" compose exec -T kafka-1 \
-    kafka-topics --bootstrap-server kafka-1:9092 --list
+    kafka-topics.sh --bootstrap-server kafka-1:9092 --list
   check "kafka topic 'event' replicated" compose exec -T kafka-1 \
-    bash -c 'kafka-topics --bootstrap-server kafka-1:9092 --describe --topic event | grep -q "ReplicationFactor: 3"'
+    bash -c 'kafka-topics.sh --bootstrap-server kafka-1:9092 --describe --topic event | grep -q "ReplicationFactor: 3"'
 }
 
 smoke_hdfs() {
@@ -251,7 +282,7 @@ smoke_yarn() {
 
 smoke_hive() {
   check "hiveserver2 query" compose exec -T hiveserver2 \
-    beeline -u jdbc:hive2://hiveserver2:10000 -n hive --silent=true -e 'show databases;'
+    /opt/hive/bin/beeline -u jdbc:hive2://hiveserver2:10000 -n hive --silent=true -e 'show databases;'
 }
 
 smoke_hbase() {
@@ -270,9 +301,28 @@ print("alive workers:", len(alive))
 sys.exit(0 if alive else 1)'
 }
 
+smoke_redis() {
+  # sh, not bash: the redis image is alpine-based and ships busybox only.
+  check "redis responds" compose exec -T redis redis-cli ping
+  check "redis read/write" compose exec -T redis \
+    sh -c 'redis-cli set openrec:smoke ok >/dev/null && test "$(redis-cli get openrec:smoke)" = ok && redis-cli del openrec:smoke >/dev/null'
+  check "redis persistence enabled" compose exec -T redis \
+    sh -c 'redis-cli config get appendonly | grep -qx yes'
+}
+
+smoke_elasticsearch() {
+  # https + basic auth, exactly how rec-server's EsConfig connects.
+  check "elasticsearch cluster health" compose exec -T elasticsearch \
+    bash -c 'curl -sf --cacert config/certs/ca/ca.crt -u "elastic:$ELASTIC_PASSWORD" "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=10s"'
+  check "elasticsearch rejects anonymous" compose exec -T elasticsearch \
+    bash -c '! curl -sf --cacert config/certs/ca/ca.crt https://localhost:9200/_cluster/health'
+}
+
 cmd_smoke() {
-  local -a components=("$@")
-  if [[ ${#components[@]} -eq 0 ]]; then components=("${COMPONENTS[@]}"); fi
+  local -a requested=("$@")
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=("${COMPONENTS[@]}"); fi
+  local -a components=()
+  mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
   SMOKE_FAILED=0
   local component
@@ -285,6 +335,8 @@ cmd_smoke() {
       hive)      running hiveserver2   || { note "hive: not running, skipped"; continue; } ;;
       hbase)     running hbase-master  || { note "hbase: not running, skipped"; continue; } ;;
       spark)     running spark-master  || { note "spark: not running, skipped"; continue; } ;;
+      redis)     running redis         || { note "redis: not running, skipped"; continue; } ;;
+      elasticsearch) running elasticsearch || { note "elasticsearch: not running, skipped"; continue; } ;;
       *)         die "unknown component '$component'" ;;
     esac
     note "$component"
@@ -300,13 +352,15 @@ cmd_smoke() {
 cmd_shell() {
   local target="${1:-}"
   case "$target" in
-    zk)    compose exec zookeeper-1 zookeeper-shell localhost:2181 ;;
+    zk)    compose exec zookeeper-1 zkCli.sh -server localhost:2181 ;;
     kafka) compose exec kafka-1 bash ;;
     hdfs)  compose exec namenode bash ;;
-    hive)  compose exec hiveserver2 beeline -u jdbc:hive2://hiveserver2:10000 -n hive ;;
+    hive)  compose exec hiveserver2 /opt/hive/bin/beeline -u jdbc:hive2://hiveserver2:10000 -n hive ;;
     hbase) compose exec hbase-master hbase shell ;;
     spark) compose exec spark-master /opt/spark/bin/spark-sql ;;
-    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark" ;;
+    redis) compose exec redis redis-cli ;;
+    es)    compose exec elasticsearch bash ;;
+    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark redis es" ;;
   esac
 }
 
@@ -320,19 +374,20 @@ open-rec bigdata-platform — docker compose control script
   ./platform.sh ps                    container state
   ./platform.sh logs [service...]     follow logs
   ./platform.sh restart <service...>  restart named services
-  ./platform.sh build [component...]  build the local images (hive/hbase/spark)
+  ./platform.sh build [component...]  build component images (default: all)
   ./platform.sh pull                  pre-pull third-party images
   ./platform.sh init [component...]   re-run the bootstrap one-shots
   ./platform.sh smoke [component...]  verify whatever is running
-  ./platform.sh shell <target>        zk | kafka | hdfs | hive | hbase | spark
+  ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|redis|es
   ./platform.sh config                dump the resolved compose config
 
-components: ${COMPONENTS[*]} all
+components: ${COMPONENTS[*]}
+aliases:    all, storage (= redis elasticsearch), es (= elasticsearch)
 
 dependency closures (what 'up <component>' actually starts):
   kafka -> zookeeper kafka          hive  -> hdfs yarn hive
   yarn  -> hdfs yarn                hbase -> zookeeper hdfs hbase
-  spark -> hdfs spark
+  spark -> hdfs spark               redis, elasticsearch -> themselves
 EOF
 }
 

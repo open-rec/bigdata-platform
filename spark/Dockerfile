@@ -10,6 +10,14 @@
 #
 # Jars are downloaded in a separate stage: the Spark image is not guaranteed to
 # ship curl, and this keeps the download layer out of the final image.
+#
+# One image, several roles (see entrypoint.sh):
+#
+#   docker build -t openrec/spark:3.5.3 ./spark
+#   docker run -d --name spark-master -p 8080:8080 -p 7077:7077 openrec/spark:3.5.3 master
+#   docker run -d --name spark-worker -e SPARK_MASTER_URL=spark://spark-master:7077 \
+#     openrec/spark:3.5.3 worker
+#   docker run --rm openrec/spark:3.5.3 submit /opt/workspace/job.py
 # ---------------------------------------------------------------------------
 
 ARG SPARK_BASE_IMAGE=apache/spark:3.5.3-python3
@@ -64,5 +72,14 @@ RUN mkdir -p /opt/hive-libs && chmod 755 /opt/hive-libs
 ENV PYSPARK_PYTHON=python3 \
     PYSPARK_DRIVER_PYTHON=python3
 
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 USER spark
 WORKDIR /opt/workspace
+
+# master ui / worker ui / history ui / jupyterlab / driver ui / master rpc
+EXPOSE 8080 8081 18080 8888 4040 7077
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["master"]

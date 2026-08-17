@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# One image, four roles. HBASE_ROLE picks which daemon this container runs.
+# One image, four roles, taken from the first argument (or HBASE_ROLE):
+#
+#   master        HBase master (16000, ui 16010)
+#   regionserver  region server (16020, ui 16030)
+#   thrift        Thrift gateway (9090, ui 9095) — the entry point for Python
+#   rest          REST gateway (8080, ui 8085)
+#   <other>       executed verbatim, e.g. `hbase shell` or `bash`
 #
 # Each is started through `hbase <role> start` rather than the hbase-daemon.sh
 # wrappers: those fork into the background and write to log files, which would
@@ -8,23 +14,15 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-ROLE="${HBASE_ROLE:-master}"
+ROLE="${1:-${HBASE_ROLE:-master}}"
 
 case "${ROLE}" in
-  master|regionserver|thrift|rest) ;;
+  master|regionserver|thrift|rest)
+    echo "starting hbase ${ROLE} (heap: ${HBASE_HEAPSIZE:-image default})"
+    exec "${HBASE_HOME}/bin/hbase" "${ROLE}" start
+    ;;
   *)
-    echo "HBASE_ROLE='${ROLE}' is not one of: master, regionserver, thrift, rest" >&2
-    exit 64
+    # Anything else is a command: `hbase shell`, `bash`, `hbase hbck`, ...
+    exec "$@"
     ;;
 esac
-
-# If anything was passed as a command, run that instead — this is what makes
-# `docker compose run hbase-master hbase shell` and `platform.sh shell hbase`
-# work.
-if [[ $# -gt 0 ]]; then
-  exec "$@"
-fi
-
-echo "starting hbase ${ROLE} (heap: ${HBASE_HEAPSIZE:-image default})"
-
-exec "${HBASE_HOME}/bin/hbase" "${ROLE}" start
