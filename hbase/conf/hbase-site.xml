@@ -1,0 +1,106 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="hbase-configuration.xsl"?>
+<!--
+  Fully distributed HBase: regions on HDFS, coordination on the platform's
+  ZooKeeper ensemble.
+
+  The quorum below relies on all three ZooKeeper nodes listening on the same
+  client port (2181) inside the network. HBase composes its connect string from
+  hbase.zookeeper.quorum plus a single hbase.zookeeper.property.clientPort, so
+  per-node ports would not survive this file — that is why the compose file
+  normalises the in-container port and only varies the published host ports.
+-->
+<configuration>
+
+  <property>
+    <name>hbase.cluster.distributed</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hbase.rootdir</name>
+    <value>hdfs://namenode:8020/hbase</value>
+  </property>
+  <property>
+    <name>hbase.tmp.dir</name>
+    <value>/tmp/hbase</value>
+  </property>
+
+  <property>
+    <name>hbase.zookeeper.quorum</name>
+    <value>zookeeper-1,zookeeper-2,zookeeper-3</value>
+  </property>
+  <property>
+    <name>hbase.zookeeper.property.clientPort</name>
+    <value>2181</value>
+  </property>
+  <property>
+    <name>zookeeper.znode.parent</name>
+    <value>/hbase</value>
+  </property>
+
+  <!-- Bind on all interfaces and advertise the container hostname, so the
+       master and regionservers can find each other on the compose network. -->
+  <property>
+    <name>hbase.master.port</name>
+    <value>16000</value>
+  </property>
+  <property>
+    <name>hbase.master.info.port</name>
+    <value>16010</value>
+  </property>
+  <property>
+    <name>hbase.master.info.bindAddress</name>
+    <value>0.0.0.0</value>
+  </property>
+  <property>
+    <name>hbase.regionserver.port</name>
+    <value>16020</value>
+  </property>
+  <property>
+    <name>hbase.regionserver.info.port</name>
+    <value>16030</value>
+  </property>
+  <property>
+    <name>hbase.regionserver.info.bindAddress</name>
+    <value>0.0.0.0</value>
+  </property>
+
+  <!-- Thrift gateway (the entry point for Python clients such as happybase). -->
+  <property>
+    <name>hbase.regionserver.thrift.port</name>
+    <value>9090</value>
+  </property>
+  <property>
+    <name>hbase.thrift.info.port</name>
+    <value>9095</value>
+  </property>
+  <property>
+    <name>hbase.thrift.info.bindAddress</name>
+    <value>0.0.0.0</value>
+  </property>
+  <property>
+    <name>hbase.regionserver.thrift.framed</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hbase.regionserver.thrift.compact</name>
+    <value>false</value>
+  </property>
+
+  <!-- Sizing knobs that matter once tables get large. -->
+  <property>
+    <name>hbase.hregion.max.filesize</name>
+    <value>10737418240</value>
+    <description>10GB before a region splits</description>
+  </property>
+  <property>
+    <name>hbase.hregion.memstore.flush.size</name>
+    <value>134217728</value>
+    <description>128MB</description>
+  </property>
+  <property>
+    <name>hbase.client.scanner.caching</name>
+    <value>1000</value>
+  </property>
+
+</configuration>

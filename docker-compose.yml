@@ -1,0 +1,952 @@
+# ===========================================================================
+# open-rec bigdata-platform
+#
+# One compose file for the whole platform. Services are grouped into profiles;
+# nothing starts unless its profile is enabled:
+#
+#   zookeeper  3-node ensemble (coordination for Kafka and HBase)
+#   kafka      3 brokers + topic bootstrap
+#   hdfs       namenode + 2 datanodes + directory bootstrap
+#   yarn       resourcemanager + 2 nodemanagers
+#   hive       postgres metastore db + metastore + hiveserver2
+#   hbase      master + 2 regionservers + thrift gateway
+#   spark      master + 2 workers + history server + jupyterlab
+#
+# Use ./platform.sh — it expands a component into its dependency closure of
+# profiles. Raw compose works too, but you must list every profile yourself:
+#
+#   docker compose --profile zookeeper --profile hdfs --profile hbase up -d
+#
+# All versions, host ports and sizing live in .env.
+# ===========================================================================
+
+networks:
+  openrec-bigdata:
+    name: openrec-bigdata
+    driver: bridge
+
+volumes:
+  zk-data-1:
+  zk-data-2:
+  zk-data-3:
+  zk-datalog-1:
+  zk-datalog-2:
+  zk-datalog-3:
+  kafka-data-1:
+  kafka-data-2:
+  kafka-data-3:
+  namenode-data:
+  datanode-data-1:
+  datanode-data-2:
+  hive-pgdata:
+  # Hive's jars, copied out of the Hive image so Spark can talk to a Hive 4
+  # metastore with a matching client (see spark/conf/spark-defaults.conf).
+  hive-libs:
+  # Shared scratch space for Spark workers and JupyterLab.
+  spark-workspace:
+
+services:
+
+  # =========================================================================
+  # ZooKeeper — profile: zookeeper
+  # Client port is 2181 *inside* the network on all three nodes (the host
+  # ports still differ). HBase builds its connect string from one shared
+  # clientPort, so a uniform port is what keeps the quorum string simple.
+  # =========================================================================
+  zookeeper-1:
+    image: confluentinc/cp-zookeeper:${CONFLUENT_VERSION}
+    container_name: zookeeper-1
+    hostname: zookeeper-1
+    profiles: ["zookeeper"]
+    restart: unless-stopped
+    ports:
+      - "${ZK1_CLIENT_PORT}:2181"
+    environment:
+      ZOOKEEPER_SERVER_ID: 1
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: srvr,stat,ruok,mntr,conf
+    volumes:
+      - zk-data-1:/var/lib/zookeeper/data
+      - zk-datalog-1:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/2181; printf srvr >&3; grep -q Mode <&3'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [openrec-bigdata]
+
+  zookeeper-2:
+    image: confluentinc/cp-zookeeper:${CONFLUENT_VERSION}
+    container_name: zookeeper-2
+    hostname: zookeeper-2
+    profiles: ["zookeeper"]
+    restart: unless-stopped
+    ports:
+      - "${ZK2_CLIENT_PORT}:2181"
+    environment:
+      ZOOKEEPER_SERVER_ID: 2
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: srvr,stat,ruok,mntr,conf
+    volumes:
+      - zk-data-2:/var/lib/zookeeper/data
+      - zk-datalog-2:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/2181; printf srvr >&3; grep -q Mode <&3'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [openrec-bigdata]
+
+  zookeeper-3:
+    image: confluentinc/cp-zookeeper:${CONFLUENT_VERSION}
+    container_name: zookeeper-3
+    hostname: zookeeper-3
+    profiles: ["zookeeper"]
+    restart: unless-stopped
+    ports:
+      - "${ZK3_CLIENT_PORT}:2181"
+    environment:
+      ZOOKEEPER_SERVER_ID: 3
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_INIT_LIMIT: 5
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVERS: zookeeper-1:2888:3888;zookeeper-2:2888:3888;zookeeper-3:2888:3888
+      ZOOKEEPER_4LW_COMMANDS_WHITELIST: srvr,stat,ruok,mntr,conf
+    volumes:
+      - zk-data-3:/var/lib/zookeeper/data
+      - zk-datalog-3:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/2181; printf srvr >&3; grep -q Mode <&3'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks: [openrec-bigdata]
+
+  # =========================================================================
+  # Kafka — profile: kafka
+  # Two listeners per broker:
+  #   INTERNAL kafka-N:9092          for clients inside this network
+  #   EXTERNAL localhost:<host port>  for clients on the docker host
+  # That is what lets rec-server on the host connect without /etc/hosts edits.
+  # =========================================================================
+  kafka-1:
+    image: confluentinc/cp-kafka:${CONFLUENT_VERSION}
+    container_name: kafka-1
+    hostname: kafka-1
+    profiles: ["kafka"]
+    restart: unless-stopped
+    depends_on:
+      zookeeper-1: {condition: service_healthy}
+      zookeeper-2: {condition: service_healthy}
+      zookeeper-3: {condition: service_healthy}
+    ports:
+      - "${KAFKA1_EXTERNAL_PORT}:${KAFKA1_EXTERNAL_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:${KAFKA1_EXTERNAL_PORT}
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:9092,EXTERNAL://localhost:${KAFKA1_EXTERNAL_PORT}
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS}
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: "-Xmx1g -Xms1g"
+    volumes:
+      - kafka-data-1:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 20s
+      retries: 12
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  kafka-2:
+    image: confluentinc/cp-kafka:${CONFLUENT_VERSION}
+    container_name: kafka-2
+    hostname: kafka-2
+    profiles: ["kafka"]
+    restart: unless-stopped
+    depends_on:
+      zookeeper-1: {condition: service_healthy}
+      zookeeper-2: {condition: service_healthy}
+      zookeeper-3: {condition: service_healthy}
+    ports:
+      - "${KAFKA2_EXTERNAL_PORT}:${KAFKA2_EXTERNAL_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:${KAFKA2_EXTERNAL_PORT}
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:9092,EXTERNAL://localhost:${KAFKA2_EXTERNAL_PORT}
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS}
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: "-Xmx1g -Xms1g"
+    volumes:
+      - kafka-data-2:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 20s
+      retries: 12
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  kafka-3:
+    image: confluentinc/cp-kafka:${CONFLUENT_VERSION}
+    container_name: kafka-3
+    hostname: kafka-3
+    profiles: ["kafka"]
+    restart: unless-stopped
+    depends_on:
+      zookeeper-1: {condition: service_healthy}
+      zookeeper-2: {condition: service_healthy}
+      zookeeper-3: {condition: service_healthy}
+    ports:
+      - "${KAFKA3_EXTERNAL_PORT}:${KAFKA3_EXTERNAL_PORT}"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper-1:2181,zookeeper-2:2181,zookeeper-3:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:${KAFKA3_EXTERNAL_PORT}
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:9092,EXTERNAL://localhost:${KAFKA3_EXTERNAL_PORT}
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS}
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: "-Xmx1g -Xms1g"
+    volumes:
+      - kafka-data-3:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 20s
+      retries: 12
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  # One-shot: creates the topics rec-server publishes to. Idempotent
+  # (--if-not-exists), so `./platform.sh init` can re-run it any time.
+  kafka-init:
+    image: confluentinc/cp-kafka:${CONFLUENT_VERSION}
+    container_name: kafka-init
+    profiles: ["kafka"]
+    restart: "no"
+    depends_on:
+      kafka-1: {condition: service_healthy}
+      kafka-2: {condition: service_healthy}
+      kafka-3: {condition: service_healthy}
+    environment:
+      TOPICS: ${KAFKA_TOPICS}
+      PARTITIONS: ${KAFKA_TOPIC_PARTITIONS}
+      REPLICATION: ${KAFKA_TOPIC_REPLICATION}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        for topic in $${TOPICS//,/ }; do
+          kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists \
+            --topic "$$topic" --partitions "$$PARTITIONS" --replication-factor "$$REPLICATION"
+        done
+        echo "--- topics ---"
+        kafka-topics --bootstrap-server kafka-1:9092 --list
+    networks: [openrec-bigdata]
+
+  # =========================================================================
+  # HDFS — profile: hdfs
+  # apache/hadoop turns env vars named <FILE>.XML_<property> into config
+  # files; the shared settings live in hadoop/hadoop.env.
+  #
+  # The volume is mounted at /opt/hadoop/dfs, one level *above* the name dir,
+  # because the entrypoint formats the namenode only when ENSURE_NAMENODE_DIR
+  # does not exist yet. Mounting the volume directly on the name dir would
+  # make it exist-but-empty on first boot and the namenode would refuse to
+  # start.
+  # =========================================================================
+  namenode:
+    image: apache/hadoop:${HADOOP_VERSION}
+    container_name: namenode
+    hostname: namenode
+    profiles: ["hdfs"]
+    restart: unless-stopped
+    user: root
+    command: ["hdfs", "namenode"]
+    env_file: ./hadoop/hadoop.env
+    environment:
+      ENSURE_NAMENODE_DIR: /opt/hadoop/dfs/name
+      HDFS-SITE.XML_dfs.replication: ${HDFS_REPLICATION}
+    ports:
+      - "${NAMENODE_UI_PORT}:9870"
+      - "${NAMENODE_RPC_PORT}:8020"
+    volumes:
+      - namenode-data:/opt/hadoop/dfs
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9870' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
+
+  datanode-1:
+    image: apache/hadoop:${HADOOP_VERSION}
+    container_name: datanode-1
+    hostname: datanode-1
+    profiles: ["hdfs"]
+    restart: unless-stopped
+    user: root
+    command: ["hdfs", "datanode"]
+    env_file: ./hadoop/hadoop.env
+    environment:
+      HDFS-SITE.XML_dfs.replication: ${HDFS_REPLICATION}
+    depends_on:
+      namenode: {condition: service_healthy}
+    ports:
+      - "${DATANODE1_UI_PORT}:9864"
+    volumes:
+      - datanode-data-1:/opt/hadoop/dfs
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9864' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
+
+  datanode-2:
+    image: apache/hadoop:${HADOOP_VERSION}
+    container_name: datanode-2
+    hostname: datanode-2
+    profiles: ["hdfs"]
+    restart: unless-stopped
+    user: root
+    command: ["hdfs", "datanode"]
+    env_file: ./hadoop/hadoop.env
+    environment:
+      HDFS-SITE.XML_dfs.replication: ${HDFS_REPLICATION}
+    depends_on:
+      namenode: {condition: service_healthy}
+    ports:
+      - "${DATANODE2_UI_PORT}:9864"
+    volumes:
+      - datanode-data-2:/opt/hadoop/dfs
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9864' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
+
+  # One-shot: waits until HDFS actually accepts writes, then lays out the
+  # directories Hive, HBase and the Spark history server expect. Everything
+  # downstream depends on this completing rather than on the namenode being
+  # up, because "namenode listening" and "HDFS usable" are not the same thing.
+  hdfs-init:
+    image: apache/hadoop:${HADOOP_VERSION}
+    container_name: hdfs-init
+    profiles: ["hdfs"]
+    restart: "no"
+    user: root
+    env_file: ./hadoop/hadoop.env
+    environment:
+      HDFS-SITE.XML_dfs.replication: ${HDFS_REPLICATION}
+    depends_on:
+      namenode: {condition: service_healthy}
+      datanode-1: {condition: service_healthy}
+      datanode-2: {condition: service_healthy}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        echo "waiting for hdfs to leave safe mode..."
+        for i in $$(seq 1 60); do
+          if hdfs dfs -ls / >/dev/null 2>&1; then break; fi
+          sleep 3
+        done
+        hdfs dfs -mkdir -p /tmp /user /user/hive/warehouse /user/spark /spark-logs /hbase
+        hdfs dfs -chmod -R 1777 /tmp
+        hdfs dfs -chmod -R 777 /user/hive/warehouse /user/spark /spark-logs
+        echo "--- hdfs layout ---"
+        hdfs dfs -ls -R /
+    networks: [openrec-bigdata]
+
+  # =========================================================================
+  # YARN — profile: yarn
+  # Needed by Hive (Hive 4 dropped the MR engine and runs on Tez) and
+  # available as an alternative to the Spark standalone master.
+  # =========================================================================
+  resourcemanager:
+    image: apache/hadoop:${HADOOP_VERSION}
+    container_name: resourcemanager
+    hostname: resourcemanager
+    profiles: ["yarn"]
+    restart: unless-stopped
+    user: root
+    command: ["yarn", "resourcemanager"]
+    env_file: ./hadoop/hadoop.env
+    depends_on:
+      hdfs-init: {condition: service_completed_successfully}
+    ports:
+      - "${RESOURCEMANAGER_UI_PORT}:8088"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8088' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
+
+  nodemanager-1:
+    image: apache/hadoop:${HADOOP_VERSION}
+    container_name: nodemanager-1
+    hostname: nodemanager-1
+    profiles: ["yarn"]
+    restart: unless-stopped
+    user: root
+    command: ["yarn", "nodemanager"]
+    env_file: ./hadoop/hadoop.env
+    environment:
+      YARN-SITE.XML_yarn.nodemanager.resource.memory-mb: ${YARN_NODEMANAGER_MEMORY_MB}
+      YARN-SITE.XML_yarn.nodemanager.resource.cpu-vcores: ${YARN_NODEMANAGER_VCORES}
+    depends_on:
+      resourcemanager: {condition: service_healthy}
+    ports:
+      - "${NODEMANAGER1_UI_PORT}:8042"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8042' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
+
+  nodemanager-2:
+    image: apache/hadoop:${HADOOP_VERSION}
+    container_name: nodemanager-2
+    hostname: nodemanager-2
+    profiles: ["yarn"]
+    restart: unless-stopped
+    user: root
+    command: ["yarn", "nodemanager"]
+    env_file: ./hadoop/hadoop.env
+    environment:
+      YARN-SITE.XML_yarn.nodemanager.resource.memory-mb: ${YARN_NODEMANAGER_MEMORY_MB}
+      YARN-SITE.XML_yarn.nodemanager.resource.cpu-vcores: ${YARN_NODEMANAGER_VCORES}
+    depends_on:
+      resourcemanager: {condition: service_healthy}
+    ports:
+      - "${NODEMANAGER2_UI_PORT}:8042"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8042' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
+
+  # =========================================================================
+  # Hive — profile: hive
+  # The warehouse lives on HDFS; metadata lives in Postgres. hive/conf is
+  # injected through HIVE_CUSTOM_CONF_DIR, which is the mechanism the
+  # apache/hive image provides for overriding hive-site.xml.
+  # =========================================================================
+  hive-metastore-db:
+    image: postgres:${POSTGRES_VERSION}
+    container_name: hive-metastore-db
+    hostname: hive-metastore-db
+    profiles: ["hive"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${HIVE_DB_NAME}
+      POSTGRES_USER: ${HIVE_DB_USER}
+      POSTGRES_PASSWORD: ${HIVE_DB_PASSWORD}
+    ports:
+      - "${HIVE_PG_PORT}:5432"
+    volumes:
+      - hive-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HIVE_DB_USER} -d ${HIVE_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [openrec-bigdata]
+
+  # One-shot: creates or upgrades the metastore schema. -initOrUpgradeSchema
+  # is idempotent, so this is safe on every boot and via `platform.sh init`.
+  hive-schema-init:
+    image: openrec/hive:${HIVE_VERSION}
+    build:
+      context: ./hive
+      args:
+        HIVE_VERSION: ${HIVE_VERSION}
+        PG_JDBC_VERSION: ${PG_JDBC_VERSION}
+    container_name: hive-schema-init
+    profiles: ["hive"]
+    restart: "no"
+    depends_on:
+      hive-metastore-db: {condition: service_healthy}
+    environment:
+      HIVE_CONF_DIR: /hive_custom_conf
+    volumes:
+      - ./hive/conf:/hive_custom_conf:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - /opt/hive/bin/schematool -dbType postgres -initOrUpgradeSchema --verbose
+    networks: [openrec-bigdata]
+
+  # One-shot: publishes Hive's jars into a volume so Spark can drive a Hive 4
+  # metastore with a matching client instead of its built-in Hive 2.3.9 one.
+  hive-libs-init:
+    image: openrec/hive:${HIVE_VERSION}
+    build:
+      context: ./hive
+      args:
+        HIVE_VERSION: ${HIVE_VERSION}
+        PG_JDBC_VERSION: ${PG_JDBC_VERSION}
+    container_name: hive-libs-init
+    profiles: ["hive"]
+    restart: "no"
+    volumes:
+      - hive-libs:/hive-libs
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - cp -n /opt/hive/lib/*.jar /hive-libs/ 2>/dev/null; echo "$$(ls /hive-libs | wc -l) jars in /hive-libs"
+    networks: [openrec-bigdata]
+
+  hive-metastore:
+    image: openrec/hive:${HIVE_VERSION}
+    build:
+      context: ./hive
+      args:
+        HIVE_VERSION: ${HIVE_VERSION}
+        PG_JDBC_VERSION: ${PG_JDBC_VERSION}
+    container_name: hive-metastore
+    hostname: hive-metastore
+    profiles: ["hive"]
+    restart: unless-stopped
+    depends_on:
+      hive-schema-init: {condition: service_completed_successfully}
+      hdfs-init: {condition: service_completed_successfully}
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      # Schema creation is hive-schema-init's job; skip it here.
+      IS_RESUME: "true"
+      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
+      SERVICE_OPTS: "-Xmx1g"
+    ports:
+      - "${HIVE_METASTORE_PORT}:9083"
+    volumes:
+      - ./hive/conf:/hive_custom_conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9083' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
+
+  hiveserver2:
+    image: openrec/hive:${HIVE_VERSION}
+    build:
+      context: ./hive
+      args:
+        HIVE_VERSION: ${HIVE_VERSION}
+        PG_JDBC_VERSION: ${PG_JDBC_VERSION}
+    container_name: hiveserver2
+    hostname: hiveserver2
+    profiles: ["hive"]
+    restart: unless-stopped
+    depends_on:
+      hive-metastore: {condition: service_healthy}
+    environment:
+      SERVICE_NAME: hiveserver2
+      IS_RESUME: "true"
+      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
+      SERVICE_OPTS: "-Xmx2g"
+    ports:
+      - "${HIVESERVER2_PORT}:10000"
+      - "${HIVESERVER2_UI_PORT}:10002"
+    volumes:
+      - ./hive/conf:/hive_custom_conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/10000' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  # =========================================================================
+  # HBase — profile: hbase
+  # Fully distributed: data on HDFS, coordination on the ZooKeeper ensemble.
+  # No official Apache image exists, so hbase/Dockerfile builds one.
+  # =========================================================================
+  hbase-master:
+    image: openrec/hbase:${HBASE_VERSION}
+    build:
+      context: ./hbase
+      args:
+        HBASE_VERSION: ${HBASE_VERSION}
+        HBASE_JDK_IMAGE: ${HBASE_JDK_IMAGE}
+    container_name: hbase-master
+    hostname: hbase-master
+    profiles: ["hbase"]
+    restart: unless-stopped
+    depends_on:
+      zookeeper-1: {condition: service_healthy}
+      zookeeper-2: {condition: service_healthy}
+      zookeeper-3: {condition: service_healthy}
+      hdfs-init: {condition: service_completed_successfully}
+    environment:
+      HBASE_ROLE: master
+      HBASE_HEAPSIZE: ${HBASE_MASTER_HEAPSIZE}
+    ports:
+      - "${HBASE_MASTER_PORT}:16000"
+      - "${HBASE_MASTER_UI_PORT}:16010"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/16010' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  hbase-regionserver-1:
+    image: openrec/hbase:${HBASE_VERSION}
+    build:
+      context: ./hbase
+      args:
+        HBASE_VERSION: ${HBASE_VERSION}
+        HBASE_JDK_IMAGE: ${HBASE_JDK_IMAGE}
+    container_name: hbase-regionserver-1
+    hostname: hbase-regionserver-1
+    profiles: ["hbase"]
+    restart: unless-stopped
+    depends_on:
+      hbase-master: {condition: service_healthy}
+    environment:
+      HBASE_ROLE: regionserver
+      HBASE_HEAPSIZE: ${HBASE_REGIONSERVER_HEAPSIZE}
+    ports:
+      - "${HBASE_RS1_PORT}:16020"
+      - "${HBASE_RS1_UI_PORT}:16030"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/16030' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  hbase-regionserver-2:
+    image: openrec/hbase:${HBASE_VERSION}
+    build:
+      context: ./hbase
+      args:
+        HBASE_VERSION: ${HBASE_VERSION}
+        HBASE_JDK_IMAGE: ${HBASE_JDK_IMAGE}
+    container_name: hbase-regionserver-2
+    hostname: hbase-regionserver-2
+    profiles: ["hbase"]
+    restart: unless-stopped
+    depends_on:
+      hbase-master: {condition: service_healthy}
+    environment:
+      HBASE_ROLE: regionserver
+      HBASE_HEAPSIZE: ${HBASE_REGIONSERVER_HEAPSIZE}
+    ports:
+      - "${HBASE_RS2_PORT}:16020"
+      - "${HBASE_RS2_UI_PORT}:16030"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/16030' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  # Thrift gateway: how non-JVM clients (Python's happybase, and therefore
+  # rank-engine's feature path) reach HBase.
+  hbase-thrift:
+    image: openrec/hbase:${HBASE_VERSION}
+    build:
+      context: ./hbase
+      args:
+        HBASE_VERSION: ${HBASE_VERSION}
+        HBASE_JDK_IMAGE: ${HBASE_JDK_IMAGE}
+    container_name: hbase-thrift
+    hostname: hbase-thrift
+    profiles: ["hbase"]
+    restart: unless-stopped
+    depends_on:
+      hbase-master: {condition: service_healthy}
+    environment:
+      HBASE_ROLE: thrift
+      HBASE_HEAPSIZE: 1g
+    ports:
+      - "${HBASE_THRIFT_PORT}:9090"
+      - "${HBASE_THRIFT_UI_PORT}:9095"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9090' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+    networks: [openrec-bigdata]
+
+  # =========================================================================
+  # Spark — profile: spark
+  # Standalone cluster. The image carries the spark-sql-kafka connector so
+  # structured streaming against the brokers above works out of the box, and
+  # reads spark/conf for the HDFS / Hive metastore wiring.
+  # =========================================================================
+  spark-master:
+    image: openrec/spark:${SPARK_VERSION}
+    build:
+      context: ./spark
+      args:
+        SPARK_BASE_IMAGE: ${SPARK_BASE_IMAGE}
+        SPARK_VERSION: ${SPARK_VERSION}
+        KAFKA_CLIENTS_VERSION: ${KAFKA_CLIENTS_VERSION}
+        COMMONS_POOL2_VERSION: ${COMMONS_POOL2_VERSION}
+        JUPYTERLAB_VERSION: ${JUPYTERLAB_VERSION}
+        HAPPYBASE_VERSION: ${HAPPYBASE_VERSION}
+    container_name: spark-master
+    hostname: spark-master
+    profiles: ["spark"]
+    restart: unless-stopped
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.master.Master
+      - --host
+      - spark-master
+      - --port
+      - "7077"
+      - --webui-port
+      - "8080"
+    environment:
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY}
+      SPARK_NO_DAEMONIZE: "true"
+    ports:
+      - "${SPARK_MASTER_UI_PORT}:8080"
+      - "${SPARK_MASTER_PORT}:7077"
+    volumes:
+      - spark-workspace:/opt/workspace
+      - ./spark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - hive-libs:/opt/hive-libs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks: [openrec-bigdata]
+
+  spark-worker-1:
+    image: openrec/spark:${SPARK_VERSION}
+    build:
+      context: ./spark
+      args:
+        SPARK_BASE_IMAGE: ${SPARK_BASE_IMAGE}
+        SPARK_VERSION: ${SPARK_VERSION}
+        KAFKA_CLIENTS_VERSION: ${KAFKA_CLIENTS_VERSION}
+        COMMONS_POOL2_VERSION: ${COMMONS_POOL2_VERSION}
+        JUPYTERLAB_VERSION: ${JUPYTERLAB_VERSION}
+        HAPPYBASE_VERSION: ${HAPPYBASE_VERSION}
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    profiles: ["spark"]
+    restart: unless-stopped
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - --webui-port
+      - "8081"
+      - --cores
+      - "${SPARK_WORKER_CORES}"
+      - --memory
+      - "${SPARK_WORKER_MEMORY}"
+      - spark://spark-master:7077
+    environment:
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY}
+      SPARK_NO_DAEMONIZE: "true"
+    depends_on:
+      spark-master: {condition: service_healthy}
+    ports:
+      - "${SPARK_WORKER1_UI_PORT}:8081"
+    volumes:
+      - spark-workspace:/opt/workspace
+      - ./spark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - hive-libs:/opt/hive-libs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks: [openrec-bigdata]
+
+  spark-worker-2:
+    image: openrec/spark:${SPARK_VERSION}
+    build:
+      context: ./spark
+      args:
+        SPARK_BASE_IMAGE: ${SPARK_BASE_IMAGE}
+        SPARK_VERSION: ${SPARK_VERSION}
+        KAFKA_CLIENTS_VERSION: ${KAFKA_CLIENTS_VERSION}
+        COMMONS_POOL2_VERSION: ${COMMONS_POOL2_VERSION}
+        JUPYTERLAB_VERSION: ${JUPYTERLAB_VERSION}
+        HAPPYBASE_VERSION: ${HAPPYBASE_VERSION}
+    container_name: spark-worker-2
+    hostname: spark-worker-2
+    profiles: ["spark"]
+    restart: unless-stopped
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.worker.Worker
+      - --webui-port
+      - "8081"
+      - --cores
+      - "${SPARK_WORKER_CORES}"
+      - --memory
+      - "${SPARK_WORKER_MEMORY}"
+      - spark://spark-master:7077
+    environment:
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY}
+      SPARK_NO_DAEMONIZE: "true"
+    depends_on:
+      spark-master: {condition: service_healthy}
+    ports:
+      - "${SPARK_WORKER2_UI_PORT}:8081"
+    volumes:
+      - spark-workspace:/opt/workspace
+      - ./spark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - hive-libs:/opt/hive-libs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks: [openrec-bigdata]
+
+  spark-history:
+    image: openrec/spark:${SPARK_VERSION}
+    build:
+      context: ./spark
+      args:
+        SPARK_BASE_IMAGE: ${SPARK_BASE_IMAGE}
+        SPARK_VERSION: ${SPARK_VERSION}
+        KAFKA_CLIENTS_VERSION: ${KAFKA_CLIENTS_VERSION}
+        COMMONS_POOL2_VERSION: ${COMMONS_POOL2_VERSION}
+        JUPYTERLAB_VERSION: ${JUPYTERLAB_VERSION}
+        HAPPYBASE_VERSION: ${HAPPYBASE_VERSION}
+    container_name: spark-history
+    hostname: spark-history
+    profiles: ["spark"]
+    restart: unless-stopped
+    command:
+      - /opt/spark/bin/spark-class
+      - org.apache.spark.deploy.history.HistoryServer
+    environment:
+      SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY}
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=hdfs://namenode:8020/spark-logs -Dspark.history.ui.port=18080"
+    depends_on:
+      hdfs-init: {condition: service_completed_successfully}
+    ports:
+      - "${SPARK_HISTORY_UI_PORT}:18080"
+    volumes:
+      - ./spark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - hive-libs:/opt/hive-libs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/18080' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    networks: [openrec-bigdata]
+
+  jupyterlab:
+    image: openrec/spark:${SPARK_VERSION}
+    build:
+      context: ./spark
+      args:
+        SPARK_BASE_IMAGE: ${SPARK_BASE_IMAGE}
+        SPARK_VERSION: ${SPARK_VERSION}
+        KAFKA_CLIENTS_VERSION: ${KAFKA_CLIENTS_VERSION}
+        COMMONS_POOL2_VERSION: ${COMMONS_POOL2_VERSION}
+        JUPYTERLAB_VERSION: ${JUPYTERLAB_VERSION}
+        HAPPYBASE_VERSION: ${HAPPYBASE_VERSION}
+    container_name: jupyterlab
+    hostname: jupyterlab
+    profiles: ["spark"]
+    restart: unless-stopped
+    working_dir: /opt/workspace
+    command:
+      - jupyter
+      - lab
+      - --ip=0.0.0.0
+      - --port=8888
+      - --no-browser
+      - --ServerApp.token=
+      - --ServerApp.password=
+      - --notebook-dir=/opt/workspace
+    environment:
+      SPARK_MASTER_URL: spark://spark-master:7077
+      PYSPARK_PYTHON: python3
+    depends_on:
+      spark-master: {condition: service_healthy}
+    ports:
+      - "${JUPYTERLAB_PORT}:8888"
+      - "${SPARK_DRIVER_UI_PORT}:4040"
+    volumes:
+      - spark-workspace:/opt/workspace
+      - ./spark/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - hive-libs:/opt/hive-libs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8888' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks: [openrec-bigdata]
