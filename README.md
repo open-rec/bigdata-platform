@@ -36,7 +36,7 @@ Postgres, the Hive metastore database, is the one component used as a stock upst
 - `vm.max_map_count >= 262144` on the docker host, or Elasticsearch will refuse to start:
   `sudo sysctl -w vm.max_map_count=262144`.
 - Outbound network on first run: every image is built locally, pulling the upstream bases plus the
-  ZooKeeper, Kafka and HBase release tarballs from `archive.apache.org`, Hive's Postgres JDBC driver
+  ZooKeeper, Kafka and HBase release tarballs from the configured mainland mirror, Hive's Postgres JDBC driver
   and Spark's Kafka connector jars from Maven Central.
 
 ## quick start
@@ -164,16 +164,14 @@ Where the configuration for each image lives:
 | `openrec/redis` | `redis/redis.conf` | extra `redis-server` flags |
 | `openrec/elasticsearch` | `elasticsearch/conf/elasticsearch.yml` | `ELASTIC_PASSWORD`, `ES_JAVA_OPTS` |
 
-The compose file bind-mounts `spark-defaults.conf` and `hive-site.xml` over what the image contains,
-so those two can be edited and picked up with a restart instead of a rebuild.
+The compose file bind-mounts `spark-defaults.conf`, `hive-site.xml`, and the Hadoop XML files needed
+by Hive's HDFS/Tez clients. Those can be edited and picked up with a restart instead of a rebuild.
 
 ## ports
 
-Host ports for ZooKeeper, Kafka and Spark are unchanged from the previous layout. Redis and
-Elasticsearch deliberately take their **default** ports (6379, 9200), because that is where
-`rec-server`, `rank-engine` and `example/init` look for them with no configuration at all. Nothing
-here collides with the two open-rec services themselves: 13579 (`rec-server`) and 8000
-(`rank-engine`).
+Several host ports are shifted to avoid common local conflicts. Container-network ports remain the
+upstream defaults. Configure host-side clients with the host ports below; nothing here collides with
+the two open-rec services themselves: 13579 (`rec-server`) and 8000 (`rank-engine`).
 
 | Service | Host port | Web UI |
 |---|---|---|
@@ -186,14 +184,14 @@ here collides with the two open-rec services themselves: 13579 (`rec-server`) an
 | hive-metastore-db (postgres) | 15432 | — |
 | hive-metastore | 9083 | — |
 | hiveserver2 | 10000 (JDBC) | http://localhost:10002 |
-| hbase-master | 16000 | http://localhost:16010 |
+| hbase-master | 16001 | http://localhost:16010 |
 | hbase-regionserver-1 / -2 | 16020 / 16021 | http://localhost:16030 , :16031 |
 | hbase-thrift | 9090 | http://localhost:9095 |
-| spark-master | 7077 | http://localhost:8080 |
-| spark-worker-1 / -2 | — | http://localhost:8081 , :8082 |
+| spark-master | 7077 | http://localhost:8083 |
+| spark-worker-1 / -2 | — | http://localhost:8084 , :8086 |
 | spark-history | — | http://localhost:18080 |
-| jupyterlab | — | http://localhost:8888 (no token), driver UI :4040 |
-| redis | 6379 | — |
+| jupyterlab | — | http://localhost:8889 (no token), driver UI :4040 |
+| redis | 6380 | — |
 | elasticsearch | 9200 (https) | https://localhost:9200 (basic auth) |
 
 All of these are set in `.env`; change them there, not in `docker-compose.yml`.
@@ -212,7 +210,7 @@ constantly, so both are spelled out:
 | HiveServer2 | `jdbc:hive2://hiveserver2:10000` | `jdbc:hive2://localhost:10000` |
 | HBase | ZK quorum above, znode `/hbase` | Thrift on `localhost:9090` |
 | Spark master | `spark://spark-master:7077` | `spark://localhost:7077` |
-| Redis | `redis:6379` | `localhost:6379` |
+| Redis | `redis:6379` | `localhost:6380` |
 | Elasticsearch | `https://elasticsearch:9200` | `https://localhost:9200` |
 
 **Kafka no longer needs an `/etc/hosts` workaround.** Each broker advertises two listeners — the
@@ -252,28 +250,28 @@ classes, so the JSON keys are camelCase (`userId`, `itemId`, `pubTime`, `isLogin
 If you run a consumer or a Spark job **inside** this network, use the internal broker addresses; join
 the network with `--network openrec-bigdata`.
 
-For the serving layer, the defaults in `application-{dev,prod}.properties` already point at this
-platform once `up storage` is running — only the Elasticsearch password has to agree:
+For the serving layer, point host-side clients at Redis's shifted host port and make the
+Elasticsearch password agree:
 
 ```properties
 redis.hostName=127.0.0.1
-redis.port=6379
+redis.port=6380
 es.host=127.0.0.1
 es.port=9200
 es.user=elastic
 es.password=openrec-es-password   # must equal ELASTIC_PASSWORD in .env
 ```
 
-`rank-engine` reads Redis from `config.py` (`RedisConfig`, `localhost:6379`) and needs it populated
-**before** startup, since `FeatureService` scans every `user:*` / `item:*` key at import time. So the
-order is: `up storage` -> run `example/init` -> start `rank-engine` -> start `rec-server`.
+Configure `rank-engine`'s `RedisConfig` for `localhost:6380`. It needs Redis populated **before**
+startup, since `FeatureService` scans every `user:*` / `item:*` key at import time. So the order is:
+`up storage` -> run `example/init` -> start `rank-engine` -> start `rec-server`.
 
 Seed the serving layer with the standalone loader:
 
 ```shell
 cd ../example
 java -cp init/target/rec-example-init-1.0-SNAPSHOT-jar-with-dependencies.jar \
-  com.openrec.example.InitStandalone 127.0.0.1 6379 127.0.0.1 9200 elastic 'openrec-es-password'
+  com.openrec.example.InitStandalone 127.0.0.1 6380 127.0.0.1 9200 elastic 'openrec-es-password'
 ```
 
 ## component notes

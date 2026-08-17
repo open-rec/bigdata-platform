@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
 <!--
-  Injected into the metastore / hiveserver2 containers through
-  HIVE_CUSTOM_CONF_DIR, and into hive-schema-init through HIVE_CONF_DIR.
+  Baked into the Hive image and bind-mounted over it by Docker Compose so
+  configuration edits only require a service restart.
 
   The connection settings below must stay in sync with HIVE_DB_NAME /
   HIVE_DB_USER / HIVE_DB_PASSWORD in ../../.env — that is what the Postgres
@@ -105,6 +105,15 @@
   <property>
     <name>hive.tez.exec.inplace.progress</name>
     <value>false</value>
+  </property>
+  <property>
+    <name>tez.lib.uris</name>
+    <value>hdfs:///apps/tez/tez.tar.gz</value>
+  </property>
+  <property>
+    <name>tez.use.cluster.hadoop-libs</name>
+    <value>true</value>
+    <description>Use yarn.application.classpath from the Hadoop cluster</description>
   </property>
 
 </configuration>

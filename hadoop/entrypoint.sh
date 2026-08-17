@@ -70,9 +70,10 @@ case "${ROLE}" in
     # /user/hive/warehouse  Hive's warehouse root
     # /spark-logs           Spark event logs, read by the history server
     # /hbase                HBase's rootdir
-    "${hdfs}" dfs -mkdir -p /tmp /user /user/hive/warehouse /user/spark /spark-logs /hbase
+    # /apps/tez             Tez runtime archive published by HiveServer2
+    "${hdfs}" dfs -mkdir -p /tmp /user /user/hive/warehouse /user/spark /spark-logs /hbase /apps/tez
     "${hdfs}" dfs -chmod -R 1777 /tmp
-    "${hdfs}" dfs -chmod -R 777 /user/hive/warehouse /user/spark /spark-logs
+    "${hdfs}" dfs -chmod -R 777 /user/hive/warehouse /user/spark /spark-logs /apps/tez
     echo "--- hdfs layout ---"
     exec "${hdfs}" dfs -ls -R /
     ;;

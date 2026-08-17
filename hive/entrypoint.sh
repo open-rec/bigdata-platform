@@ -15,6 +15,8 @@ set -euo pipefail
 
 export HIVE_HOME="${HIVE_HOME:-/opt/hive}"
 export HADOOP_HOME="${HADOOP_HOME:-/opt/hadoop}"
+export TEZ_HOME="${TEZ_HOME:-/opt/tez}"
+export HADOOP_CLASSPATH="${TEZ_HOME}/*:${TEZ_HOME}/lib/*:${HADOOP_CLASSPATH:-}"
 DB_TYPE="${HIVE_DB_TYPE:-postgres}"
 
 wait_for_metastore_db() {
@@ -31,12 +33,36 @@ wait_for_metastore_db() {
   return 1
 }
 
+publish_tez() {
+  local attempt target=/apps/tez/tez.tar.gz temporary
+  for attempt in $(seq 1 60); do
+    if "${HADOOP_HOME}/bin/hdfs" dfs -test -d / >/dev/null 2>&1; then
+      if ! "${HADOOP_HOME}/bin/hdfs" dfs -test -d /apps/tez; then
+        echo "HDFS directory /apps/tez is missing; re-run the hdfs init role" >&2
+        return 1
+      fi
+      if ! "${HADOOP_HOME}/bin/hdfs" dfs -test -e "${target}"; then
+        temporary="${target}.tmp.$$"
+        "${HADOOP_HOME}/bin/hdfs" dfs -put /opt/tez.tar.gz "${temporary}"
+        "${HADOOP_HOME}/bin/hdfs" dfs -chmod 644 "${temporary}"
+        "${HADOOP_HOME}/bin/hdfs" dfs -mv "${temporary}" "${target}"
+      fi
+      return 0
+    fi
+    echo "waiting for HDFS before publishing Tez (${attempt}/60)..."
+    sleep 2
+  done
+  echo "HDFS never became reachable for Tez publication" >&2
+  return 1
+}
+
 case "${1:-metastore}" in
   metastore)
     exec "${HIVE_HOME}/bin/hive" --service metastore
     ;;
 
   hiveserver2)
+    publish_tez
     exec "${HIVE_HOME}/bin/hive" --service hiveserver2
     ;;
 

@@ -31,7 +31,7 @@ RUN set -eux; \
 
 RUN set -eux; \
     curl -fsSL -o /tmp/kafka.tgz \
-      "https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"; \
+      "https://mirrors.huaweicloud.com/apache/kafka/${KAFKA_VERSION}/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}.tgz"; \
     tar -xzf /tmp/kafka.tgz -C /opt; \
     ln -s "/opt/kafka_${KAFKA_SCALA_VERSION}-${KAFKA_VERSION}" /opt/kafka; \
     rm -f /tmp/kafka.tgz; \

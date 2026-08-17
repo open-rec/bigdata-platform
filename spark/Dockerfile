@@ -56,6 +56,7 @@ RUN set -eux; \
       rm -rf /var/lib/apt/lists/*; \
     fi; \
     python3 -m pip install --no-cache-dir \
+      --index-url https://mirrors.aliyun.com/pypi/simple/ \
       "jupyterlab==${JUPYTERLAB_VERSION}" \
       "happybase==${HAPPYBASE_VERSION}" \
       pandas pyarrow
@@ -70,7 +71,8 @@ RUN mkdir -p /opt/workspace && chmod 777 /opt/workspace
 RUN mkdir -p /opt/hive-libs && chmod 755 /opt/hive-libs
 
 ENV PYSPARK_PYTHON=python3 \
-    PYSPARK_DRIVER_PYTHON=python3
+    PYSPARK_DRIVER_PYTHON=python3 \
+    HOME=/opt/workspace
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

@@ -23,7 +23,7 @@ RUN set -eux; \
 
 RUN set -eux; \
     curl -fsSL -o /tmp/zookeeper.tar.gz \
-      "https://archive.apache.org/dist/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/apache-zookeeper-${ZOOKEEPER_VERSION}-bin.tar.gz"; \
+      "https://mirrors.huaweicloud.com/apache/zookeeper/zookeeper-${ZOOKEEPER_VERSION}/apache-zookeeper-${ZOOKEEPER_VERSION}-bin.tar.gz"; \
     tar -xzf /tmp/zookeeper.tar.gz -C /opt; \
     ln -s "/opt/apache-zookeeper-${ZOOKEEPER_VERSION}-bin" /opt/zookeeper; \
     rm -f /tmp/zookeeper.tar.gz; \

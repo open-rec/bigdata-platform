@@ -26,7 +26,7 @@ RUN set -eux; \
 
 RUN set -eux; \
     curl -fsSL -o /tmp/hbase.tar.gz \
-      "https://archive.apache.org/dist/hbase/${HBASE_VERSION}/hbase-${HBASE_VERSION}-bin.tar.gz"; \
+      "https://mirrors.huaweicloud.com/apache/hbase/${HBASE_VERSION}/hbase-${HBASE_VERSION}-bin.tar.gz"; \
     mkdir -p /opt; \
     tar -xzf /tmp/hbase.tar.gz -C /opt; \
     ln -s "/opt/hbase-${HBASE_VERSION}" /opt/hbase; \

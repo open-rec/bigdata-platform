@@ -273,6 +273,8 @@ smoke_hdfs() {
     hdfs dfs -test -d /user/hive/warehouse
   check "hdfs spark-logs dir" compose exec -T namenode \
     hdfs dfs -test -d /spark-logs
+  check "hdfs Tez runtime archive" compose exec -T namenode \
+    hdfs dfs -test -e /apps/tez/tez.tar.gz
 }
 
 smoke_yarn() {
@@ -283,6 +285,10 @@ smoke_yarn() {
 smoke_hive() {
   check "hiveserver2 query" compose exec -T hiveserver2 \
     /opt/hive/bin/beeline -u jdbc:hive2://hiveserver2:10000 -n hive --silent=true -e 'show databases;'
+  # Metadata-only statements do not start Tez. A temporary table keeps this
+  # check isolated while exercising HiveServer2 -> Tez -> YARN end to end.
+  check "hive Tez execution" compose exec -T hiveserver2 bash -c \
+    '/opt/hive/bin/beeline -u jdbc:hive2://hiveserver2:10000 -n hive --silent=true --showHeader=false --outputformat=tsv2 -e "create temporary table openrec_tez_smoke (value int); insert into openrec_tez_smoke values (1),(2),(3); select sum(value) from openrec_tez_smoke;" 2>/dev/null | grep -qx 6'
 }
 
 smoke_hbase() {

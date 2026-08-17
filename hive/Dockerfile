@@ -31,7 +31,9 @@ COPY --from=jdbc /tmp/postgresql.jar /opt/hive/lib/postgresql-${PG_JDBC_VERSION}
 COPY conf/hive-site.xml /opt/hive/conf/hive-site.xml
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
-    && chown -R hive:hive /opt/hive/conf /opt/hive/lib 2>/dev/null || true
+    && tar -czf /opt/tez.tar.gz -C /opt/tez . \
+    && mkdir -p /home/hive \
+    && chown -R hive:hive /home/hive /opt/hive/conf /opt/hive/lib /opt/tez.tar.gz
 
 USER hive
 

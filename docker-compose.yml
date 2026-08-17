@@ -132,6 +132,13 @@ x-spark-conf: &spark-conf
 
 x-hive-conf: &hive-conf
   - ./hive/conf/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+  # The upstream Hive image's Hadoop client defaults to file:///. Hive SQL
+  # reads fs.defaultFS from hive-site.xml, but hdfs CLI and Tez also need the
+  # platform's core/YARN settings in Hadoop's own configuration directory.
+  - ./hadoop/conf/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+  - ./hadoop/conf/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+  - ./hadoop/conf/yarn-site.xml:/opt/hadoop/etc/hadoop/yarn-site.xml:ro
+  - ./hadoop/conf/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml:ro
 
 services:
 
