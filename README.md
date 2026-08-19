@@ -241,9 +241,9 @@ host ports differ). HBase composes its connect string from `hbase.zookeeper.quor
 
 ## connecting the open-rec services
 
-`rec-server` in `prod` mode publishes pushed items, users and events to Kafka
+`rec-server` in `cluster` mode publishes pushed items, users and events to Kafka
 (`server.pushService=pushKafkaService`). Point it at the brokers in
-`rec-server/server/src/main/resources/application-prod.properties`:
+`rec-server/server/src/main/resources/application-cluster.properties`:
 
 ```properties
 spring.kafka.bootstrap-servers=localhost:19092,localhost:29092,localhost:39092
