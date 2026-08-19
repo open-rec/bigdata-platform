@@ -71,9 +71,12 @@ case "${ROLE}" in
     # /spark-logs           Spark event logs, read by the history server
     # /hbase                HBase's rootdir
     # /apps/tez             Tez runtime archive published by HiveServer2
-    "${hdfs}" dfs -mkdir -p /tmp /user /user/hive/warehouse /user/spark /spark-logs /hbase /apps/tez
+    # /openrec              raw/features plus Flink/Spark durable state
+    "${hdfs}" dfs -mkdir -p /tmp /user /user/hive/warehouse /user/spark /spark-logs /hbase /apps/tez \
+      /openrec/raw/user /openrec/raw/item /openrec/raw/event /openrec/features \
+      /openrec/checkpoints/flink /openrec/checkpoints/spark-features /openrec/savepoints/flink
     "${hdfs}" dfs -chmod -R 1777 /tmp
-    "${hdfs}" dfs -chmod -R 777 /user/hive/warehouse /user/spark /spark-logs /apps/tez
+    "${hdfs}" dfs -chmod -R 777 /user/hive/warehouse /user/spark /spark-logs /apps/tez /openrec
     echo "--- hdfs layout ---"
     exec "${hdfs}" dfs -ls -R /
     ;;

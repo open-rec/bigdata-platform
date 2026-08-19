@@ -1,0 +1,16 @@
+jobmanager.rpc.address: flink-jobmanager
+jobmanager.bind-host: 0.0.0.0
+rest.address: flink-jobmanager
+rest.bind-address: 0.0.0.0
+taskmanager.bind-host: 0.0.0.0
+
+parallelism.default: 2
+state.backend: rocksdb
+state.checkpoints.dir: hdfs://namenode:8020/openrec/checkpoints/flink
+state.savepoints.dir: hdfs://namenode:8020/openrec/savepoints/flink
+execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+
+blob.server.port: 6124
+query.server.port: 6125
+taskmanager.data.port: 6122
+jobmanager.rpc.port: 6123

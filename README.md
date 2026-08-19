@@ -5,7 +5,7 @@ The infrastructure open-rec runs on, as one Docker Compose project with two peer
 | Mode | Components | Intended use |
 |---|---|---|
 | `standalone` | Redis + Elasticsearch | small data, one machine, direct ingestion from `rec-server` |
-| `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Redis, Elasticsearch | distributed ingestion, storage, and offline processing |
+| `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Flink, Redis, Elasticsearch | distributed ingestion, storage, and online/offline processing |
 
 Standalone is the complete small-data mode described by
 [example_standalone](https://github.com/open-rec/example/tree/master/example_standalone), not a
@@ -25,6 +25,7 @@ Each image takes a **role** as its argument (`namenode`, `datanode`, `broker`, `
 | Hive | the warehouse: SQL and a metastore over HDFS, the data source for offline training | `openrec/hive` (`apache/hive`) | `metastore`, `hiveserver2`, `schematool`, `publish-libs`, `beeline` |
 | HBase | random-access KV store for large-scale point lookups | `openrec/hbase` (Apache tarball) | `master`, `regionserver`, `thrift`, `rest` |
 | Spark | batch and structured-streaming compute, Kafka connector included | `openrec/spark` (`apache/spark`) | `master`, `worker`, `history`, `jupyter`, `submit`, `sql` |
+| Flink | stateful streaming compute with HDFS checkpoints | `openrec/flink` (`flink`) | `jobmanager`, `taskmanager` |
 | Redis | serving-layer KV store: recall tables, user/item rows, events | `openrec/redis` (`redis`) | — |
 | Elasticsearch | serving-layer vector index for embedding recall | `openrec/elasticsearch` (`docker.elastic.co`) | `server`, `certs` |
 
@@ -40,7 +41,7 @@ Postgres, the Hive metastore database, is the one component used as a stock upst
   `sudo sysctl -w vm.max_map_count=262144`.
 - Outbound network on first run: every image is built locally, pulling the upstream bases plus the
   ZooKeeper, Kafka and HBase release tarballs from the configured mainland mirror, Hive's Postgres JDBC driver
-  and Spark's Kafka connector jars from Maven Central.
+  Spark's Kafka connector jars, and Flink's Hadoop compatibility jar from Maven Central.
 
 ## quick start
 
@@ -92,6 +93,7 @@ needs HDFS:
 | `hive` | hdfs, yarn, hive |
 | `hbase` | zookeeper, hdfs, hbase |
 | `spark` | hdfs, spark |
+| `flink` | hdfs, flink |
 | `redis` | redis |
 | `elasticsearch` | elasticsearch |
 | `standalone` | redis, elasticsearch |
@@ -106,7 +108,8 @@ docker compose --profile zookeeper --profile hdfs --profile hbase up -d
 ```
 
 `./platform.sh shell hive` drops into beeline, `shell hbase` into the HBase shell, `shell spark` into
-`spark-sql`, `shell redis` into `redis-cli`, `shell zk` into `zookeeper-shell`.
+`spark-sql`, `shell flink` into the JobManager, `shell redis` into `redis-cli`, and `shell zk` into
+`zookeeper-shell`.
 
 ### start scripts
 
@@ -128,6 +131,7 @@ One per component, for starting a single piece of the platform without rememberi
 | `start_hive_cluster.sh` | HDFS + YARN + metastore db, metastore, HiveServer2 |
 | `start_hbase_cluster.sh` | ZooKeeper + HDFS + master, 2 regionservers, Thrift |
 | `start_spark_cluster.sh` | HDFS + master, 2 workers, history server, JupyterLab |
+| `start_flink_cluster.sh` | HDFS + JobManager and 2 TaskManagers |
 | `start_redis_cluster.sh` | Redis |
 | `start_elasticsearch_cluster.sh` | Elasticsearch |
 
@@ -226,6 +230,7 @@ constantly, so both are spelled out:
 | HiveServer2 | `jdbc:hive2://hiveserver2:10000` | `jdbc:hive2://localhost:10000` |
 | HBase | ZK quorum above, znode `/hbase` | Thrift on `localhost:9090` |
 | Spark master | `spark://spark-master:7077` | `spark://localhost:7077` |
+| Flink REST/UI | `http://flink-jobmanager:8081` | `http://localhost:8087` |
 | Redis | `redis:6379` | `localhost:6380` |
 | Elasticsearch | `https://elasticsearch:9200` | `https://localhost:9200` |
 
@@ -377,6 +382,24 @@ docker exec -it spark-master /opt/spark/bin/spark-submit \
 
 `/opt/workspace` is a shared volume visible to both workers and JupyterLab.
 
+### Flink
+
+Flink 1.14 runs one JobManager and two TaskManagers with two slots each. It is parallel to Spark:
+both are part of Cluster mode, but deploy a given streaming job to only one engine. Checkpoints and
+savepoints use HDFS paths under `/openrec/checkpoints/flink` and `/openrec/savepoints/flink`.
+
+```shell
+./start_flink_cluster.sh
+docker cp ../data-processor/flink/target/rec-flink-1.0-SNAPSHOT.jar \
+  flink-jobmanager:/opt/flink/jobs/openrec-features.jar
+docker exec flink-jobmanager flink run -d \
+  -c com.openrec.dp.flink.DpJob /opt/flink/jobs/openrec-features.jar
+```
+
+Open `http://localhost:8087` to inspect jobs, checkpoints and TaskManagers. The image includes the
+Hadoop compatibility jar required by the HDFS sinks. Runtime configuration is baked from
+`flink/conf/flink-conf.yaml`; rebuild with `./platform.sh build flink` after changing it.
+
 ### Redis
 
 Single node on 6379, **no password**, AOF plus RDB persistence, config in `redis/redis.conf`
@@ -450,7 +473,7 @@ docker volume rm openrec-bigdata_namenode-data \
   Elasticsearch is the only component with TLS and authentication (because its clients insist);
   Kafka, HDFS, Hive, HBase and Redis all speak plaintext with no auth, HDFS permission checks are off
   and JupyterLab has an empty token. It is a development and simulation platform.
-- **First build is slow.** Eight images, three of them unpacking Apache release tarballs and two
+- **First build is slow.** Nine images, three of them unpacking Apache release tarballs and three
   downloading jars — expect a few GB of downloads and several minutes. `./platform.sh build <component>`
   builds just the one you need.
 - **`hive.execution.engine=tez` depends on the Tez setup inside the Hive image.** If Tez jobs fail to
@@ -465,8 +488,5 @@ docker volume rm openrec-bigdata_namenode-data \
   single-node discovery setting; `elasticsearch/entrypoint.sh` and `elasticsearch/conf/elasticsearch.yml`
   are the places to extend.
 - **No Kibana.** Query Elasticsearch with `curl -k -u elastic:<password>` or from the client code.
-- **Flink is not included.** `example_cluster` lists it as an alternative stream processor; nothing in
-  open-rec targets it today.
-- **`data-processor` is still unpublished.** This repo provides the infrastructure that the
-  Kafka → warehouse/KV pipeline would run on, not the pipeline itself: no Hive DDL, no Spark jobs and
-  no HBase table definitions ship here.
+- **Feature processing lives in `data-processor`.** Its Spark 3.5 and Flink 1.14 jobs consume Kafka,
+  update Redis, and persist raw data plus feature snapshots to HDFS for offline training.

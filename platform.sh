@@ -16,16 +16,16 @@
 #   ./platform.sh pull
 #   ./platform.sh init [component...]   re-run the bootstrap one-shots
 #   ./platform.sh smoke [component...]  verify what is running
-#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|redis|es
+#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|redis|es
 #   ./platform.sh config                resolved compose config
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark redis elasticsearch)
+readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink redis elasticsearch)
 readonly STANDALONE_COMPONENTS=(redis elasticsearch)
-readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark redis elasticsearch)
+readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink redis elasticsearch)
 
 # --- docker compose v2 / v1 ------------------------------------------------
 if docker compose version >/dev/null 2>&1; then
@@ -52,6 +52,7 @@ profiles_for() {
     hive)      echo "hdfs yarn hive" ;;
     hbase)     echo "zookeeper hdfs hbase" ;;
     spark)     echo "hdfs spark" ;;
+    flink)     echo "hdfs flink" ;;
     redis)     echo "redis" ;;
     elasticsearch) echo "elasticsearch" ;;
     all)       echo "${COMPONENTS[*]}" ;;
@@ -66,7 +67,7 @@ validate_components() {
   local component
   for component in "$@"; do
     case "$component" in
-      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|redis|elasticsearch|all) ;;
+      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|redis|elasticsearch|all) ;;
       *) die "unknown component '$component' (valid: ${COMPONENTS[*]} all)" ;;
     esac
   done
@@ -140,6 +141,7 @@ build_targets() {
     hive)          echo "hive-metastore" ;;
     hbase)         echo "hbase-master" ;;
     spark)         echo "spark-master" ;;
+    flink)         echo "flink-jobmanager" ;;
     redis)         echo "redis" ;;
     elasticsearch) echo "elasticsearch" ;;
     *)             echo "" ;;
@@ -290,6 +292,8 @@ smoke_hdfs() {
     hdfs dfs -test -d /spark-logs
   check "hdfs Tez runtime archive" compose exec -T namenode \
     hdfs dfs -test -e /apps/tez/tez.tar.gz
+  check "hdfs openrec feature dirs" compose exec -T namenode \
+    hdfs dfs -test -d /openrec/checkpoints/flink
 }
 
 smoke_yarn() {
@@ -320,6 +324,13 @@ d = json.load(urllib.request.urlopen("http://spark-master:8080/json/"))
 alive = [w for w in d.get("workers", []) if w.get("state") == "ALIVE"]
 print("alive workers:", len(alive))
 sys.exit(0 if alive else 1)'
+}
+
+smoke_flink() {
+  check "flink two taskmanagers" compose exec -T flink-jobmanager bash -c \
+    'curl -fsS http://flink-jobmanager:8081/taskmanagers | grep -o '"'"'"id"'"'"' | wc -l | grep -qx 2'
+  check "flink four task slots" compose exec -T flink-jobmanager bash -c \
+    'curl -fsS http://flink-jobmanager:8081/overview | grep -Eq "slots-total[^0-9]*4"'
 }
 
 smoke_redis() {
@@ -356,6 +367,7 @@ cmd_smoke() {
       hive)      running hiveserver2   || { note "hive: not running, skipped"; continue; } ;;
       hbase)     running hbase-master  || { note "hbase: not running, skipped"; continue; } ;;
       spark)     running spark-master  || { note "spark: not running, skipped"; continue; } ;;
+      flink)     running flink-jobmanager || { note "flink: not running, skipped"; continue; } ;;
       redis)     running redis         || { note "redis: not running, skipped"; continue; } ;;
       elasticsearch) running elasticsearch || { note "elasticsearch: not running, skipped"; continue; } ;;
       *)         die "unknown component '$component'" ;;
@@ -379,9 +391,10 @@ cmd_shell() {
     hive)  compose exec hiveserver2 /opt/hive/bin/beeline -u jdbc:hive2://hiveserver2:10000 -n hive ;;
     hbase) compose exec hbase-master hbase shell ;;
     spark) compose exec spark-master /opt/spark/bin/spark-sql ;;
+    flink) compose exec flink-jobmanager bash ;;
     redis) compose exec redis redis-cli ;;
     es)    compose exec elasticsearch bash ;;
-    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark redis es" ;;
+    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark flink redis es" ;;
   esac
 }
 
@@ -400,7 +413,7 @@ open-rec bigdata-platform — docker compose control script
   ./platform.sh pull                  pre-pull third-party images
   ./platform.sh init [mode|component...] re-run bootstrap one-shots
   ./platform.sh smoke [mode|component...] verify a mode (default: standalone)
-  ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|redis|es
+  ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|redis|es
   ./platform.sh config                dump the resolved compose config
 
 modes:
@@ -413,7 +426,8 @@ compatibility aliases: storage (= standalone), all (= cluster), es (= elasticsea
 dependency closures (what 'up <component>' actually starts):
   kafka -> zookeeper kafka          hive  -> hdfs yarn hive
   yarn  -> hdfs yarn                hbase -> zookeeper hdfs hbase
-  spark -> hdfs spark               redis, elasticsearch -> themselves
+  spark -> hdfs spark               flink -> hdfs flink
+  redis, elasticsearch -> themselves
 EOF
 }
 
