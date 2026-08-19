@@ -6,8 +6,9 @@
 # closure of profiles. `up hive` starts HDFS and YARN too, because a Hive
 # warehouse without them is not a warehouse.
 #
-#   ./platform.sh up [component...]     default: all
-#   ./platform.sh down [-v]             -v also deletes the volumes (all data)
+#   ./platform.sh up [mode|component...] default: standalone
+#   ./platform.sh down [mode|component...] default: standalone
+#   ./platform.sh down -v              destroy the whole project and all data
 #   ./platform.sh ps
 #   ./platform.sh logs [service...]
 #   ./platform.sh restart [service...]
@@ -23,6 +24,8 @@ set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark redis elasticsearch)
+readonly STANDALONE_COMPONENTS=(redis elasticsearch)
+readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark redis elasticsearch)
 
 # --- docker compose v2 / v1 ------------------------------------------------
 if docker compose version >/dev/null 2>&1; then
@@ -69,18 +72,19 @@ validate_components() {
   done
 }
 
-# Expands the convenience aliases so every other function only ever sees
-# canonical component names.
+# Expands deployment modes and compatibility aliases so every other function
+# only ever sees canonical component names. Modes are the normal user entry
+# point; individual components remain available for development and repair.
 normalize_components() {
   local component
   for component in "$@"; do
     case "$component" in
-      es)      echo "elasticsearch" ;;
-      storage) echo "redis"; echo "elasticsearch" ;;
-      all)     printf '%s\n' "${COMPONENTS[@]}" ;;
-      *)       echo "$component" ;;
+      es)                    echo "elasticsearch" ;;
+      standalone|storage)    printf '%s\n' "${STANDALONE_COMPONENTS[@]}" ;;
+      cluster|all)           printf '%s\n' "${CLUSTER_COMPONENTS[@]}" ;;
+      *)                     echo "$component" ;;
     esac
-  # Order-preserving dedupe: 'storage redis' must not process redis twice.
+  # Order-preserving dedupe: 'standalone redis' must not process redis twice.
   done | awk '!seen[$0]++'
 }
 
@@ -155,7 +159,7 @@ init_targets() {
 # --- commands --------------------------------------------------------------
 cmd_up() {
   local -a requested=("$@")
-  if [[ ${#requested[@]} -eq 0 ]]; then requested=(all); fi
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
   local -a components=()
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
@@ -172,8 +176,19 @@ EOF
 }
 
 cmd_down() {
-  note "stopping platform"
-  compose down "$@"
+  if [[ "${1:-}" == "-v" ]]; then
+    [[ $# -eq 1 ]] || die "'down -v' does not accept a mode; it destroys all modes and volumes"
+    note "destroying all modes and volumes"
+    compose down -v
+    return
+  fi
+  local -a requested=("$@")
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
+  local -a components=()
+  mapfile -t components < <(normalize_components "${requested[@]}")
+  validate_components "${components[@]}"
+  note "stopping: ${components[*]}"
+  compose_for "${components[*]}" stop
 }
 
 cmd_ps() { compose ps "$@"; }
@@ -193,7 +208,7 @@ cmd_restart() {
 
 cmd_build() {
   local -a requested=("$@")
-  if [[ ${#requested[@]} -eq 0 ]]; then requested=(all); fi
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
   local -a components=()
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
@@ -222,7 +237,7 @@ cmd_pull() {
 
 cmd_init() {
   local -a requested=("$@")
-  if [[ ${#requested[@]} -eq 0 ]]; then requested=("${COMPONENTS[@]}"); fi
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
   local -a components=()
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
@@ -326,7 +341,7 @@ smoke_elasticsearch() {
 
 cmd_smoke() {
   local -a requested=("$@")
-  if [[ ${#requested[@]} -eq 0 ]]; then requested=("${COMPONENTS[@]}"); fi
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
   local -a components=()
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
@@ -374,21 +389,26 @@ usage() {
   cat <<EOF
 open-rec bigdata-platform — docker compose control script
 
-  ./platform.sh up [component...]     start components and their dependencies
-                                      (default: all)
-  ./platform.sh down [-v]             stop everything; -v also deletes volumes
+  ./platform.sh up [mode|component...] start a mode or selected components
+                                       (default: standalone)
+  ./platform.sh down [mode|component...] stop a mode (default: standalone)
+  ./platform.sh down -v              destroy all modes and delete all volumes
   ./platform.sh ps                    container state
   ./platform.sh logs [service...]     follow logs
   ./platform.sh restart <service...>  restart named services
-  ./platform.sh build [component...]  build component images (default: all)
+  ./platform.sh build [mode|component...] build images (default: standalone)
   ./platform.sh pull                  pre-pull third-party images
-  ./platform.sh init [component...]   re-run the bootstrap one-shots
-  ./platform.sh smoke [component...]  verify whatever is running
+  ./platform.sh init [mode|component...] re-run bootstrap one-shots
+  ./platform.sh smoke [mode|component...] verify a mode (default: standalone)
   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|redis|es
   ./platform.sh config                dump the resolved compose config
 
+modes:
+  standalone -> ${STANDALONE_COMPONENTS[*]}
+  cluster    -> ${CLUSTER_COMPONENTS[*]}
+
 components: ${COMPONENTS[*]}
-aliases:    all, storage (= redis elasticsearch), es (= elasticsearch)
+compatibility aliases: storage (= standalone), all (= cluster), es (= elasticsearch)
 
 dependency closures (what 'up <component>' actually starts):
   kafka -> zookeeper kafka          hive  -> hdfs yarn hive

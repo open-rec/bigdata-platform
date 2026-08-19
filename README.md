@@ -1,12 +1,15 @@
 # bigdata-platform
 
-The infrastructure open-rec runs on, as one Docker Compose project: ZooKeeper, Kafka, HDFS, YARN,
-Hive, HBase, Spark, Redis and Elasticsearch.
+The infrastructure open-rec runs on, as one Docker Compose project with two peer deployment modes:
 
-Redis and Elasticsearch are the **serving layer** — the two stores `rec-server` reads on every
-request — so `./platform.sh up storage` is now enough to run
-[example_standalone](https://github.com/open-rec/example/tree/master/example_standalone) without
-installing anything on the host. The rest is the big-data layer that cluster mode adds.
+| Mode | Components | Intended use |
+|---|---|---|
+| `standalone` | Redis + Elasticsearch | small data, one machine, direct ingestion from `rec-server` |
+| `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Redis, Elasticsearch | distributed ingestion, storage, and offline processing |
+
+Standalone is the complete small-data mode described by
+[example_standalone](https://github.com/open-rec/example/tree/master/example_standalone), not a
+partially started Cluster. Both modes share the serving-store contracts, images, and tooling.
 
 **Each component is its own image, built from its own Dockerfile with its configuration baked in.**
 `docker-compose.yml` only orchestrates them, so any component can equally be deployed on its own —
@@ -41,33 +44,38 @@ Postgres, the Hive metastore database, is the one component used as a stock upst
 
 ## quick start
 
+Choose one mode explicitly. Without an argument, `up`, `build`, and `smoke` default to Standalone.
+
 ```shell
-./platform.sh pull            # fetch the upstream base images (a bad tag shows up here)
-./platform.sh build           # build every openrec/* image (or: build hdfs, build kafka, ...)
-./platform.sh up all          # or: up storage / up kafka / up hive / up hbase / up spark
-./platform.sh ps              # wait until services report healthy
-./platform.sh smoke           # verify each running component
+./platform.sh build standalone
+./platform.sh up standalone
+./platform.sh smoke standalone
+
+./platform.sh build cluster
+./platform.sh up cluster
+./platform.sh smoke cluster
 ```
 
 Bring-up is asynchronous. On a cold start the namenode formats itself, Hive creates its metastore
 schema and Kafka creates its topics; two or three minutes is normal. `smoke` is how you find out
 whether it worked — `up` returning does not mean the platform is ready.
 
-Tear down with `./platform.sh down`, or `./platform.sh down -v` to delete the volumes as well (all
-HDFS data, Kafka logs and Hive metadata go with them).
+Stop only the selected mode with `./platform.sh down standalone` or `./platform.sh down cluster`.
+`./platform.sh down -v` is deliberately global: it destroys both modes and all persisted data.
 
 ## platform.sh
 
 ```
-./platform.sh up [component...]     start components plus their dependencies (default: all)
-./platform.sh down [-v]             stop everything; -v also deletes volumes
+./platform.sh up [mode|component...] start a mode or component closure (default: standalone)
+./platform.sh down [mode|component...] stop a mode (default: standalone)
+./platform.sh down -v              destroy both modes and delete all volumes
 ./platform.sh ps                    container state
 ./platform.sh logs [service...]     follow logs
 ./platform.sh restart <service...>  restart named services
-./platform.sh build [component...]  build component images (default: all)
+./platform.sh build [mode|component...] build images (default: standalone)
 ./platform.sh pull                  pre-pull third-party images
-./platform.sh init [component...]   re-run the bootstrap one-shots (idempotent)
-./platform.sh smoke [component...]  verify whatever is running
+./platform.sh init [mode|component...] re-run bootstrap one-shots (default: standalone)
+./platform.sh smoke [mode|component...] verify a mode (default: standalone)
 ./platform.sh shell <target>        zk | kafka | hdfs | hive | hbase | spark | redis | es
 ./platform.sh config                dump the resolved compose config
 ```
@@ -86,8 +94,10 @@ needs HDFS:
 | `spark` | hdfs, spark |
 | `redis` | redis |
 | `elasticsearch` | elasticsearch |
-| `storage` | redis, elasticsearch (alias) |
-| `all` | everything |
+| `standalone` | redis, elasticsearch |
+| `cluster` | all components |
+| `storage` | compatibility alias for `standalone` |
+| `all` | compatibility alias for `cluster` |
 
 Raw Compose works too, but you must name every profile yourself:
 
@@ -99,6 +109,13 @@ docker compose --profile zookeeper --profile hdfs --profile hbase up -d
 `spark-sql`, `shell redis` into `redis-cli`, `shell zk` into `zookeeper-shell`.
 
 ### start scripts
+
+Mode-level scripts are the preferred entry points:
+
+| Script | Brings up |
+|---|---|
+| `start_standalone.sh` | complete Standalone mode: Redis + Elasticsearch |
+| `start_cluster.sh` | complete Cluster mode: all infrastructure components |
 
 One per component, for starting a single piece of the platform without remembering its dependencies:
 
@@ -113,10 +130,9 @@ One per component, for starting a single piece of the platform without rememberi
 | `start_spark_cluster.sh` | HDFS + master, 2 workers, history server, JupyterLab |
 | `start_redis_cluster.sh` | Redis |
 | `start_elasticsearch_cluster.sh` | Elasticsearch |
-| `start_storage_cluster.sh` | Redis + Elasticsearch |
 
-They are one-line shims over `platform.sh up <component>`, so the dependency closure stays defined in
-exactly one place. Extra arguments are passed through. The first three keep their historical names
+They are one-line shims over `platform.sh up <mode|component>`, so mode membership and dependency
+closures stay defined in exactly one place. Extra arguments are passed through. Older scripts keep their historical names
 because the [example_cluster](https://github.com/open-rec/example/tree/master/example_cluster)
 walkthrough references them; unlike the versions it describes, they start in the **background**.
 
@@ -262,9 +278,9 @@ es.user=elastic
 es.password=openrec-es-password   # must equal ELASTIC_PASSWORD in .env
 ```
 
-Configure `rank-engine`'s `RedisConfig` for `localhost:6380`. It needs Redis populated **before**
-startup, since `FeatureService` scans every `user:*` / `item:*` key at import time. So the order is:
-`up storage` -> run `example/init` -> start `rank-engine` -> start `rec-server`.
+The Standalone order is `up standalone` -> run `example/init` -> start `rec-server`. Configure and
+start `rank-engine` only when the graph's rank node is enabled; its Redis endpoint is
+`localhost:6380`.
 
 Seed the serving layer with the standalone loader:
 

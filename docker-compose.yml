@@ -19,8 +19,9 @@
 #   redis          serving-layer KV store for rec-server
 #   elasticsearch  serving-layer vector index (TLS + auth)
 #
-# Use ./platform.sh — it expands a component into its dependency closure of
-# profiles. Raw compose works too, but you must list every profile yourself:
+# Use ./platform.sh with the peer `standalone` or `cluster` modes; it expands
+# modes and individual components into profile dependency closures. Raw
+# Compose works too, but you must list every profile yourself:
 #
 #   docker compose --profile zookeeper --profile hdfs --profile hbase up -d
 #
