@@ -152,12 +152,18 @@ x-airflow: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-db:5432/${AIRFLOW_DB_NAME}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    # LocalExecutor workers run inside the scheduler container. Airflow 3 otherwise derives
+    # http://localhost:8080/execution/, where no API server exists in that container.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+    # Airflow 3 generates a random value per process when this is omitted, causing task JWTs from
+    # the scheduler to fail signature validation in the separate API server container.
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USERS}
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/logs/simple_auth_manager_passwords.json.generated
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     AIRFLOW__DAG_PROCESSOR__PARSING_PROCESSES: "1"
   volumes: &airflow-volumes
-    - ./airflow/dags:/opt/airflow/dags:ro
+    - ${AIRFLOW_DAGS_PATH}:/opt/airflow/dags:ro
     - airflow-logs:/opt/airflow/logs
 
 # Config bind-mounted over what the image bakes in, so edits take effect on
