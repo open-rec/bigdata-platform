@@ -113,35 +113,30 @@ docker compose --profile zookeeper --profile hdfs --profile hbase up -d
 `spark-sql`, `shell flink` into the JobManager, `shell redis` into `redis-cli`, and `shell zk` into
 `zookeeper-shell`.
 
-### start scripts
+### lifecycle examples
 
-Mode-level scripts are the preferred entry points:
+`platform.sh` is the single lifecycle entry point for modes and individual components. The same
+target is accepted by `up`, `down`, `build`, `pull`, `init`, and `smoke` where applicable:
 
-| Script | Brings up |
-|---|---|
-| `start_standalone.sh` | complete Standalone mode: Redis + Elasticsearch |
-| `start_cluster.sh` | complete Cluster mode: all infrastructure components |
+```shell
+# Complete recommendation infrastructure modes.
+./platform.sh up standalone
+./platform.sh down standalone
+./platform.sh up cluster
+./platform.sh down cluster
 
-One per component, for starting a single piece of the platform without remembering its dependencies:
+# One component plus its dependency closure.
+./platform.sh up kafka
+./platform.sh smoke kafka
+./platform.sh down kafka
 
-| Script | Brings up |
-|---|---|
-| `start_zookeeper_cluster.sh` | the 3-node ensemble |
-| `start_kafka_cluster.sh` | ZooKeeper + 3 brokers + topic bootstrap |
-| `start_hadoop_cluster.sh` | namenode + 2 datanodes + HDFS bootstrap |
-| `start_yarn_cluster.sh` | HDFS + resourcemanager + 2 nodemanagers |
-| `start_hive_cluster.sh` | HDFS + YARN + metastore db, metastore, HiveServer2 |
-| `start_hbase_cluster.sh` | ZooKeeper + HDFS + master, 2 regionservers, Thrift |
-| `start_spark_cluster.sh` | HDFS + master, 2 workers, history server, JupyterLab |
-| `start_flink_cluster.sh` | HDFS + JobManager and 2 TaskManagers |
-| `start_airflow.sh` | Airflow API/UI + LocalExecutor scheduler + DAG processor + PostgreSQL |
-| `start_redis_cluster.sh` | Redis |
-| `start_elasticsearch_cluster.sh` | Elasticsearch |
+# Several selected components in one operation.
+./platform.sh up kafka airflow redis
+./platform.sh down kafka airflow redis
+```
 
-They are one-line shims over `platform.sh up <mode|component>`, so mode membership and dependency
-closures stay defined in exactly one place. Extra arguments are passed through. Older scripts keep their historical names
-because the [example_cluster](https://github.com/open-rec/example/tree/master/example_cluster)
-walkthrough references them; unlike the versions it describes, they start in the **background**.
+`down` only stops containers and preserves named volumes. Use the deliberately global
+`./platform.sh down -v` only when all platform data should be deleted.
 
 ## deploying a component on its own
 
@@ -394,7 +389,7 @@ both are part of Cluster mode, but deploy a given streaming job to only one engi
 savepoints use HDFS paths under `/openrec/checkpoints/flink` and `/openrec/savepoints/flink`.
 
 ```shell
-./start_flink_cluster.sh
+./platform.sh up flink
 docker cp ../data-processor/flink/target/rec-flink-1.0-SNAPSHOT.jar \
   flink-jobmanager:/opt/flink/jobs/openrec-features.jar
 docker exec flink-jobmanager flink run -d \
