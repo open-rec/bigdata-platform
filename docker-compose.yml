@@ -52,6 +52,7 @@ volumes:
   # Hive's jars, published by hive-libs-init so Spark can drive a Hive 4
   # metastore with a matching client (see spark/conf/spark-defaults.conf).
   hive-libs:
+    name: openrec-hive-libs
   # Shared scratch space for Spark workers and JupyterLab.
   spark-workspace:
   # Shared submission directory for Flink jars.

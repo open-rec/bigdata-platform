@@ -41,6 +41,7 @@ FROM ${SPARK_BASE_IMAGE}
 
 ARG JUPYTERLAB_VERSION=4.2.5
 ARG HAPPYBASE_VERSION=1.2.0
+ARG ELASTICSEARCH_PY_VERSION=8.19.0
 
 USER root
 
@@ -59,6 +60,7 @@ RUN set -eux; \
       --index-url https://mirrors.aliyun.com/pypi/simple/ \
       "jupyterlab==${JUPYTERLAB_VERSION}" \
       "happybase==${HAPPYBASE_VERSION}" \
+      "elasticsearch==${ELASTICSEARCH_PY_VERSION}" \
       pandas pyarrow
 
 # Shared scratch space. A named volume mounted here inherits these permissions
