@@ -28,6 +28,20 @@ wait_for_hdfs() {
   return 1
 }
 
+wait_for_writable_hdfs() {
+  local attempt state
+  for attempt in $(seq 1 60); do
+    state="$("${HADOOP_HOME}/bin/hdfs" dfsadmin -safemode get 2>/dev/null || true)"
+    if grep -Fq "Safe mode is OFF" <<<"${state}"; then
+      return 0
+    fi
+    echo "waiting for hdfs safe mode to turn off (${attempt}/60): ${state:-unavailable}"
+    sleep 3
+  done
+  echo "hdfs remained in safe mode and cannot accept initialization writes" >&2
+  return 1
+}
+
 case "${ROLE}" in
   namenode)
     # "Formatted" means the name dir holds a current/VERSION file. Checking for
@@ -66,6 +80,10 @@ case "${ROLE}" in
 
   init)
     wait_for_hdfs
+    # A restarted namenode can answer reads while it is still rebuilding its
+    # block map. Mutating commands fail during this safe-mode extension, so do
+    # not treat a successful `hdfs dfs -ls /` as write readiness.
+    wait_for_writable_hdfs
     hdfs="${HADOOP_HOME}/bin/hdfs"
     # /user/hive/warehouse  Hive's warehouse root
     # /spark-logs           Spark event logs, read by the history server

@@ -13,19 +13,19 @@
 #   ./platform.sh logs [service...]
 #   ./platform.sh restart [service...]
 #   ./platform.sh build [component...]  every component has its own Dockerfile
-#   ./platform.sh pull
+#   ./platform.sh pull [mode|component...] pre-pull third-party images
 #   ./platform.sh init [component...]   re-run the bootstrap one-shots
 #   ./platform.sh smoke [component...]  verify what is running
-#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|redis|es
+#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|airflow|redis|es
 #   ./platform.sh config                resolved compose config
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink redis elasticsearch)
+readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch)
 readonly STANDALONE_COMPONENTS=(redis elasticsearch)
-readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink redis elasticsearch)
+readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch)
 
 # --- docker compose v2 / v1 ------------------------------------------------
 if docker compose version >/dev/null 2>&1; then
@@ -53,6 +53,7 @@ profiles_for() {
     hbase)     echo "zookeeper hdfs hbase" ;;
     spark)     echo "hdfs spark" ;;
     flink)     echo "hdfs flink" ;;
+    airflow)   echo "airflow" ;;
     redis)     echo "redis" ;;
     elasticsearch) echo "elasticsearch" ;;
     all)       echo "${COMPONENTS[*]}" ;;
@@ -67,7 +68,7 @@ validate_components() {
   local component
   for component in "$@"; do
     case "$component" in
-      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|redis|elasticsearch|all) ;;
+      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|all) ;;
       *) die "unknown component '$component' (valid: ${COMPONENTS[*]} all)" ;;
     esac
   done
@@ -142,6 +143,7 @@ build_targets() {
     hbase)         echo "hbase-master" ;;
     spark)         echo "spark-master" ;;
     flink)         echo "flink-jobmanager" ;;
+    airflow)       echo "" ;;
     redis)         echo "redis" ;;
     elasticsearch) echo "elasticsearch" ;;
     *)             echo "" ;;
@@ -154,6 +156,7 @@ init_targets() {
     hdfs)  echo "hdfs-init" ;;
     kafka) echo "kafka-init" ;;
     hive)  echo "hive-schema-init hive-libs-init" ;;
+    airflow) echo "airflow-init" ;;
     *)     echo "" ;;
   esac
 }
@@ -166,6 +169,13 @@ cmd_up() {
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
   note "starting: ${components[*]}"
+  # A locally rebuilt image makes Compose recreate its old container. Docker
+  # can try to bind the replacement before the stopped container's
+  # userland-proxy has fully released its host port (notably Kafka's 29092),
+  # producing a false "address already in use". Remove only stopped
+  # containers first; named volumes and all persisted data remain untouched,
+  # while running services are deliberately left alone.
+  compose_for "${components[*]}" rm -f
   compose_for "${components[*]}" up -d
   note "state"
   compose ps
@@ -190,6 +200,18 @@ cmd_down() {
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
   note "stopping: ${components[*]}"
+  # ZooKeeper owns Kafka's ephemeral /brokers/ids/* registrations. Stopping
+  # the whole Compose project concurrently can terminate ZooKeeper before the
+  # brokers unregister, causing NodeExists failures on an immediate restart.
+  # Stop brokers first while the ZooKeeper ensemble is still healthy.
+  local has_kafka=false has_zookeeper=false component
+  for component in "${components[@]}"; do
+    [[ "${component}" == "kafka" ]] && has_kafka=true
+    [[ "${component}" == "zookeeper" ]] && has_zookeeper=true
+  done
+  if [[ "${has_kafka}" == true && "${has_zookeeper}" == true ]]; then
+    compose stop kafka-init kafka-1 kafka-2 kafka-3
+  fi
   compose_for "${components[*]}" stop
 }
 
@@ -230,11 +252,21 @@ cmd_build() {
 }
 
 cmd_pull() {
-  note "pulling third-party images (locally built ones are skipped)"
-  # --ignore-buildable landed in a later compose 2.x; fall back for older ones,
-  # where pulling the locally-built images fails and is ignored instead.
-  compose pull --ignore-buildable 2>/dev/null \
-    || compose pull --ignore-pull-failures
+  local -a requested=("$@")
+  if [[ ${#requested[@]} -eq 0 ]]; then requested=(all); fi
+  local -a components=()
+  mapfile -t components < <(normalize_components "${requested[@]}")
+  validate_components "${components[@]}"
+  note "pulling third-party images for: ${components[*]} (locally built ones are skipped)"
+  # --ignore-buildable landed in a later Compose 2.x. Detect it up front so
+  # normal pull progress and genuine registry errors are never hidden.
+  if "${DC[@]}" pull --help 2>&1 | grep -q -- '--ignore-buildable'; then
+    compose_for "${components[*]}" pull --ignore-buildable
+  else
+    # Older Compose tries locally-built image names too; keep going after those
+    # expected misses while still showing every result to the operator.
+    compose_for "${components[*]}" pull --ignore-pull-failures
+  fi
 }
 
 cmd_init() {
@@ -333,6 +365,15 @@ smoke_flink() {
     'curl -fsS http://flink-jobmanager:8081/overview | grep -Eq "slots-total[^0-9]*4"'
 }
 
+smoke_airflow() {
+  check "airflow API health" compose exec -T airflow-api-server \
+    curl -fsS http://localhost:8080/api/v2/monitor/health
+  check "airflow scheduler heartbeat" compose exec -T airflow-scheduler \
+    bash -c 'airflow jobs check --job-type SchedulerJob --hostname "$HOSTNAME"'
+  check "airflow DAG processor" compose exec -T airflow-dag-processor \
+    bash -c 'airflow jobs check --job-type DagProcessorJob --hostname "$HOSTNAME"'
+}
+
 smoke_redis() {
   # sh, not bash: the redis image is alpine-based and ships busybox only.
   check "redis responds" compose exec -T redis redis-cli ping
@@ -368,6 +409,7 @@ cmd_smoke() {
       hbase)     running hbase-master  || { note "hbase: not running, skipped"; continue; } ;;
       spark)     running spark-master  || { note "spark: not running, skipped"; continue; } ;;
       flink)     running flink-jobmanager || { note "flink: not running, skipped"; continue; } ;;
+      airflow)   running airflow-api-server || { note "airflow: not running, skipped"; continue; } ;;
       redis)     running redis         || { note "redis: not running, skipped"; continue; } ;;
       elasticsearch) running elasticsearch || { note "elasticsearch: not running, skipped"; continue; } ;;
       *)         die "unknown component '$component'" ;;
@@ -392,9 +434,10 @@ cmd_shell() {
     hbase) compose exec hbase-master hbase shell ;;
     spark) compose exec spark-master /opt/spark/bin/spark-sql ;;
     flink) compose exec flink-jobmanager bash ;;
+    airflow) compose exec airflow-scheduler bash ;;
     redis) compose exec redis redis-cli ;;
     es)    compose exec elasticsearch bash ;;
-    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark flink redis es" ;;
+    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark flink airflow redis es" ;;
   esac
 }
 
@@ -410,10 +453,10 @@ open-rec bigdata-platform — docker compose control script
   ./platform.sh logs [service...]     follow logs
   ./platform.sh restart <service...>  restart named services
   ./platform.sh build [mode|component...] build images (default: standalone)
-  ./platform.sh pull                  pre-pull third-party images
+  ./platform.sh pull [mode|component...] pre-pull third-party images (default: all)
   ./platform.sh init [mode|component...] re-run bootstrap one-shots
   ./platform.sh smoke [mode|component...] verify a mode (default: standalone)
-  ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|redis|es
+  ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|airflow|redis|es
   ./platform.sh config                dump the resolved compose config
 
 modes:
@@ -427,7 +470,7 @@ dependency closures (what 'up <component>' actually starts):
   kafka -> zookeeper kafka          hive  -> hdfs yarn hive
   yarn  -> hdfs yarn                hbase -> zookeeper hdfs hbase
   spark -> hdfs spark               flink -> hdfs flink
-  redis, elasticsearch -> themselves
+  airflow, redis, elasticsearch -> themselves
 EOF
 }
 

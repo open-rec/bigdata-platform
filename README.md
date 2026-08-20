@@ -5,7 +5,7 @@ The infrastructure open-rec runs on, as one Docker Compose project with two peer
 | Mode | Components | Intended use |
 |---|---|---|
 | `standalone` | Redis + Elasticsearch | small data, one machine, direct ingestion from `rec-server` |
-| `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Flink, Redis, Elasticsearch | distributed ingestion, storage, and online/offline processing |
+| `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Flink, Airflow, Redis, Elasticsearch | distributed ingestion, storage, scheduling, and online/offline processing |
 
 Standalone is the complete small-data mode described by
 [example_standalone](https://github.com/open-rec/example/tree/master/example_standalone), not a
@@ -26,6 +26,7 @@ Each image takes a **role** as its argument (`namenode`, `datanode`, `broker`, `
 | HBase | random-access KV store for large-scale point lookups | `openrec/hbase` (Apache tarball) | `master`, `regionserver`, `thrift`, `rest` |
 | Spark | batch and structured-streaming compute, Kafka connector included | `openrec/spark` (`apache/spark`) | `master`, `worker`, `history`, `jupyter`, `submit`, `sql` |
 | Flink | stateful streaming compute with HDFS checkpoints | `openrec/flink` (`flink`) | `jobmanager`, `taskmanager` |
+| Airflow | lightweight daily Hive/Spark workflow orchestration | `apache/airflow` via DaoCloud's Docker Hub mirror | `api-server`, `scheduler`, `dag-processor`, `init` |
 | Redis | serving-layer KV store: recall tables, user/item rows, events | `openrec/redis` (`redis`) | — |
 | Elasticsearch | serving-layer vector index for embedding recall | `openrec/elasticsearch` (`docker.elastic.co`) | `server`, `certs` |
 
@@ -35,7 +36,7 @@ Postgres, the Hive metastore database, is the one component used as a stock upst
 
 - Docker with the Compose plugin (`docker compose`). The v1 `docker-compose` binary also works —
   `platform.sh` detects whichever is present.
-- Roughly 20 GB of RAM and 8 cores for the full stack; a single profile needs far less. Sizing knobs
+- Roughly 22 GB of RAM and 8 cores for the full stack; a single profile needs far less. Sizing knobs
   are at the bottom of `.env`.
 - `vm.max_map_count >= 262144` on the docker host, or Elasticsearch will refuse to start:
   `sudo sysctl -w vm.max_map_count=262144`.
@@ -74,10 +75,10 @@ Stop only the selected mode with `./platform.sh down standalone` or `./platform.
 ./platform.sh logs [service...]     follow logs
 ./platform.sh restart <service...>  restart named services
 ./platform.sh build [mode|component...] build images (default: standalone)
-./platform.sh pull                  pre-pull third-party images
+./platform.sh pull [mode|component...] pre-pull third-party images (default: all)
 ./platform.sh init [mode|component...] re-run bootstrap one-shots (default: standalone)
 ./platform.sh smoke [mode|component...] verify a mode (default: standalone)
-./platform.sh shell <target>        zk | kafka | hdfs | hive | hbase | spark | redis | es
+./platform.sh shell <target>        zk | kafka | hdfs | hive | hbase | spark | airflow | redis | es
 ./platform.sh config                dump the resolved compose config
 ```
 
@@ -94,6 +95,7 @@ needs HDFS:
 | `hbase` | zookeeper, hdfs, hbase |
 | `spark` | hdfs, spark |
 | `flink` | hdfs, flink |
+| `airflow` | airflow |
 | `redis` | redis |
 | `elasticsearch` | elasticsearch |
 | `standalone` | redis, elasticsearch |
@@ -132,6 +134,7 @@ One per component, for starting a single piece of the platform without rememberi
 | `start_hbase_cluster.sh` | ZooKeeper + HDFS + master, 2 regionservers, Thrift |
 | `start_spark_cluster.sh` | HDFS + master, 2 workers, history server, JupyterLab |
 | `start_flink_cluster.sh` | HDFS + JobManager and 2 TaskManagers |
+| `start_airflow.sh` | Airflow API/UI + LocalExecutor scheduler + DAG processor + PostgreSQL |
 | `start_redis_cluster.sh` | Redis |
 | `start_elasticsearch_cluster.sh` | Elasticsearch |
 
@@ -191,7 +194,7 @@ by Hive's HDFS/Tez clients. Those can be edited and picked up with a restart ins
 
 Several host ports are shifted to avoid common local conflicts. Container-network ports remain the
 upstream defaults. Configure host-side clients with the host ports below; nothing here collides with
-the two open-rec services themselves: 13579 (`rec-server`) and 8000 (`rank-engine`).
+the two open-rec services themselves: 13579 (`rec-server`) and 8123 (`rank-engine`).
 
 | Service | Host port | Web UI |
 |---|---|---|
@@ -211,6 +214,7 @@ the two open-rec services themselves: 13579 (`rec-server`) and 8000 (`rank-engin
 | spark-worker-1 / -2 | — | http://localhost:8084 , :8086 |
 | spark-history | — | http://localhost:18080 |
 | jupyterlab | — | http://localhost:8889 (no token), driver UI :4040 |
+| airflow-api-server | — | http://localhost:8091 |
 | redis | 6380 | — |
 | elasticsearch | 9200 (https) | https://localhost:9200 (basic auth) |
 
@@ -231,6 +235,7 @@ constantly, so both are spelled out:
 | HBase | ZK quorum above, znode `/hbase` | Thrift on `localhost:9090` |
 | Spark master | `spark://spark-master:7077` | `spark://localhost:7077` |
 | Flink REST/UI | `http://flink-jobmanager:8081` | `http://localhost:8087` |
+| Airflow API/UI | `http://airflow-api-server:8080` | `http://localhost:8091` |
 | Redis | `redis:6379` | `localhost:6380` |
 | Elasticsearch | `https://elasticsearch:9200` | `https://localhost:9200` |
 

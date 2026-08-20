@@ -74,8 +74,34 @@ wait_for_broker() {
   return 1
 }
 
+wait_for_broker_registration_slot() {
+  local broker_id="${KAFKA_BROKER_ID:-}" connect="${KAFKA_ZOOKEEPER_CONNECT:-}" attempt output
+  [[ -n "${broker_id}" && -n "${connect}" ]] || return 0
+  for attempt in $(seq 1 60); do
+    output="$(printf 'get /brokers/ids/%s\n' "${broker_id}" \
+      | "${KAFKA_HOME}/bin/zookeeper-shell.sh" "${connect}" 2>&1 || true)"
+    if grep -Fq "Node does not exist" <<<"${output}"; then
+      return 0
+    fi
+    if grep -Fq '"broker.id"' <<<"${output}" || grep -Fq '"endpoints"' <<<"${output}"; then
+      echo "waiting for stale ZooKeeper broker registration ${broker_id} to expire (${attempt}/60)..."
+    else
+      echo "waiting for ZooKeeper broker registry (${attempt}/60)..."
+    fi
+    sleep 2
+  done
+  echo "ZooKeeper broker registration /brokers/ids/${broker_id} was not released" >&2
+  return 1
+}
+
 case "${ROLE}" in
   broker)
+    # Docker may stop ZooKeeper before a broker's session-close handshake is
+    # persisted. On an immediate restart, starting Kafka while its old
+    # ephemeral /brokers/ids/<id> node exists makes Kafka exit fatally and
+    # Compose fails its dependencies. Wait for session expiry without deleting
+    # a registration that could still belong to a live broker.
+    wait_for_broker_registration_slot
     render_config
     exec "${KAFKA_HOME}/bin/kafka-server-start.sh" "${CONFIG}"
     ;;
