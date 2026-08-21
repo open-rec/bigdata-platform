@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: OpenRec
+    orgId: 1
+    folder: OpenRec
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

@@ -16,16 +16,16 @@
 #   ./platform.sh pull [mode|component...] pre-pull third-party images
 #   ./platform.sh init [component...]   re-run the bootstrap one-shots
 #   ./platform.sh smoke [component...]  verify what is running
-#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|airflow|redis|es
+#   ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|airflow|redis|es|prometheus|grafana
 #   ./platform.sh config                resolved compose config
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch)
-readonly STANDALONE_COMPONENTS=(redis elasticsearch)
-readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch)
+readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch monitoring)
+readonly STANDALONE_COMPONENTS=(redis elasticsearch monitoring)
+readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch monitoring)
 
 # --- docker compose v2 / v1 ------------------------------------------------
 if docker compose version >/dev/null 2>&1; then
@@ -56,6 +56,7 @@ profiles_for() {
     airflow)   echo "airflow" ;;
     redis)     echo "redis" ;;
     elasticsearch) echo "elasticsearch" ;;
+    monitoring) echo "monitoring" ;;
     all)       echo "${COMPONENTS[*]}" ;;
     *)         die "unknown component '$1' (valid: ${COMPONENTS[*]} all)" ;;
   esac
@@ -68,7 +69,7 @@ validate_components() {
   local component
   for component in "$@"; do
     case "$component" in
-      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|all) ;;
+      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|monitoring|all) ;;
       *) die "unknown component '$component' (valid: ${COMPONENTS[*]} all)" ;;
     esac
   done
@@ -391,6 +392,15 @@ smoke_elasticsearch() {
     bash -c '! curl -sf --cacert config/certs/ca/ca.crt https://localhost:9200/_cluster/health'
 }
 
+smoke_monitoring() {
+  check "prometheus ready" compose exec -T prometheus \
+    wget -q -O /dev/null http://localhost:9090/-/ready
+  check "prometheus self target up" compose exec -T prometheus \
+    sh -c 'wget -q -O - '\''http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22prometheus%22%7D'\'' | grep -q '\''"value":\[[^]]*,"1"\]'\'''
+  check "grafana healthy" compose exec -T grafana \
+    sh -c 'wget -q -O - http://localhost:3000/api/health | grep -q '\''"database": *"ok"'\'''
+}
+
 cmd_smoke() {
   local -a requested=("$@")
   if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
@@ -412,6 +422,7 @@ cmd_smoke() {
       airflow)   running airflow-api-server || { note "airflow: not running, skipped"; continue; } ;;
       redis)     running redis         || { note "redis: not running, skipped"; continue; } ;;
       elasticsearch) running elasticsearch || { note "elasticsearch: not running, skipped"; continue; } ;;
+      monitoring) running prometheus && running grafana || { note "monitoring: not running, skipped"; continue; } ;;
       *)         die "unknown component '$component'" ;;
     esac
     note "$component"
@@ -437,7 +448,9 @@ cmd_shell() {
     airflow) compose exec airflow-scheduler bash ;;
     redis) compose exec redis redis-cli ;;
     es)    compose exec elasticsearch bash ;;
-    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark flink airflow redis es" ;;
+    prometheus) compose exec prometheus sh ;;
+    grafana) compose exec grafana sh ;;
+    *)     die "shell target must be one of: zk kafka hdfs hive hbase spark flink airflow redis es prometheus grafana" ;;
   esac
 }
 
@@ -456,7 +469,7 @@ open-rec bigdata-platform — docker compose control script
   ./platform.sh pull [mode|component...] pre-pull third-party images (default: all)
   ./platform.sh init [mode|component...] re-run bootstrap one-shots
   ./platform.sh smoke [mode|component...] verify a mode (default: standalone)
-  ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|airflow|redis|es
+  ./platform.sh shell <target>        zk|kafka|hdfs|hive|hbase|spark|flink|airflow|redis|es|prometheus|grafana
   ./platform.sh config                dump the resolved compose config
 
 modes:
@@ -470,7 +483,7 @@ dependency closures (what 'up <component>' actually starts):
   kafka -> zookeeper kafka          hive  -> hdfs yarn hive
   yarn  -> hdfs yarn                hbase -> zookeeper hdfs hbase
   spark -> hdfs spark               flink -> hdfs flink
-  airflow, redis, elasticsearch -> themselves
+  airflow, redis, elasticsearch, monitoring -> themselves
 EOF
 }
 

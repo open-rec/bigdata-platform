@@ -4,8 +4,8 @@ The infrastructure open-rec runs on, as one Docker Compose project with two peer
 
 | Mode | Components | Intended use |
 |---|---|---|
-| `standalone` | Redis + Elasticsearch | small data, one machine, direct ingestion from `rec-server` |
-| `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Flink, Airflow, Redis, Elasticsearch | distributed ingestion, storage, scheduling, and online/offline processing |
+| `standalone` | Redis + Elasticsearch + Prometheus + Grafana | small data, one machine, direct ingestion from `rec-server` |
+| `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Flink, Airflow, Redis, Elasticsearch, Prometheus, Grafana | distributed ingestion, storage, scheduling, online/offline processing, and observability |
 
 Standalone is the complete small-data mode described by
 [example_standalone](https://github.com/open-rec/example/tree/master/example_standalone), not a
@@ -29,6 +29,7 @@ Each image takes a **role** as its argument (`namenode`, `datanode`, `broker`, `
 | Airflow | lightweight daily Hive/Spark workflow orchestration | `apache/airflow` via DaoCloud's Docker Hub mirror | `api-server`, `scheduler`, `dag-processor`, `init` |
 | Redis | serving-layer KV store: recall tables, user/item rows, events | `openrec/redis` (`redis`) | — |
 | Elasticsearch | serving-layer vector index for embedding recall | `openrec/elasticsearch` (`docker.elastic.co`) | `server`, `certs` |
+| Prometheus + Grafana | metrics storage, queries, dashboards, and alerting foundation | upstream images via DaoCloud's Docker Hub mirror | — |
 
 Postgres, the Hive metastore database, is the one component used as a stock upstream image.
 
@@ -78,7 +79,7 @@ Stop only the selected mode with `./platform.sh down standalone` or `./platform.
 ./platform.sh pull [mode|component...] pre-pull third-party images (default: all)
 ./platform.sh init [mode|component...] re-run bootstrap one-shots (default: standalone)
 ./platform.sh smoke [mode|component...] verify a mode (default: standalone)
-./platform.sh shell <target>        zk | kafka | hdfs | hive | hbase | spark | airflow | redis | es
+./platform.sh shell <target>        zk | kafka | hdfs | hive | hbase | spark | airflow | redis | es | prometheus | grafana
 ./platform.sh config                dump the resolved compose config
 ```
 
@@ -98,7 +99,8 @@ needs HDFS:
 | `airflow` | airflow |
 | `redis` | redis |
 | `elasticsearch` | elasticsearch |
-| `standalone` | redis, elasticsearch |
+| `monitoring` | monitoring |
+| `standalone` | redis, elasticsearch, monitoring |
 | `cluster` | all components |
 | `storage` | compatibility alias for `standalone` |
 | `all` | compatibility alias for `cluster` |
@@ -112,6 +114,30 @@ docker compose --profile zookeeper --profile hdfs --profile hbase up -d
 `./platform.sh shell hive` drops into beeline, `shell hbase` into the HBase shell, `shell spark` into
 `spark-sql`, `shell flink` into the JobManager, `shell redis` into `redis-cli`, and `shell zk` into
 `zookeeper-shell`.
+
+## observability
+
+Prometheus and Grafana are grouped under the `monitoring` component and start with both deployment
+modes. They can also be managed independently:
+
+```shell
+./platform.sh up monitoring
+./platform.sh smoke monitoring
+./platform.sh down monitoring
+```
+
+Prometheus is available at <http://localhost:9091>. Grafana is available at
+<http://localhost:3000>; the default credentials come from `GRAFANA_ADMIN_USER` and
+`GRAFANA_ADMIN_PASSWORD` in `.env`. Grafana's default Prometheus data source is provisioned
+automatically, so dashboards and exporters can be added without manual data-source setup.
+The provisioned `OpenRec rec-server API` dashboard is also embedded by rec-console. Anonymous
+Grafana access is limited to the Viewer role so the console can render it; administrative changes
+still require the configured Grafana credentials.
+
+This initial observability layer scrapes Prometheus itself. Platform components should be added to
+`monitoring/prometheus/prometheus.yml` as their native Prometheus endpoints or exporters are enabled.
+Prometheus retains metrics for 15 days by default; change `PROMETHEUS_RETENTION` in `.env` when a
+different local retention window is required.
 
 ### lifecycle examples
 
@@ -449,7 +475,8 @@ curl -k -u elastic:openrec-es-password https://localhost:9200/_cat/indices?v
 
 Everything stateful is in named volumes: `namenode-data`, `datanode-data-{1,2}`,
 `kafka-data-{1,2,3}`, `zk-data*`, `hive-pgdata`, `hive-libs`, `spark-workspace`, `redis-data`,
-`elastic-data` and `elastic-certs`. `down` keeps them; `down -v` destroys them.
+`elastic-data`, `elastic-certs`, `prometheus-data` and `grafana-data`. `down` keeps them; `down -v`
+destroys them.
 
 Deleting `elastic-certs` is safe — the elasticsearch image regenerates the CA and node certificate on
 the next start. Deleting `redis-data` means re-running `example/init` to reseed the serving layer.
