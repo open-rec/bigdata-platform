@@ -597,6 +597,9 @@ services:
     container_name: hive-libs-init
     profiles: ["hive"]
     restart: "no"
+    # A fresh named volume is root-owned. This one-shot must be able to
+    # populate it before Spark mounts it read-only.
+    user: "0:0"
     command: ["publish-libs"]
     volumes:
       - hive-libs:/hive-libs
@@ -767,7 +770,6 @@ services:
       spark-master: {condition: service_healthy}
     environment:
       SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
       SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY}
       SPARK_NO_DAEMONIZE: "true"
@@ -791,7 +793,6 @@ services:
       spark-master: {condition: service_healthy}
     environment:
       SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
       SPARK_DAEMON_MEMORY: ${SPARK_DAEMON_MEMORY}
       SPARK_NO_DAEMONIZE: "true"

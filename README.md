@@ -393,11 +393,11 @@ services, no rebuild:
 ./platform.sh restart spark-master spark-worker-1 spark-worker-2 spark-history jupyterlab
 ```
 
-**Hive integration is opt-in.** Spark 3.5 embeds a Hive 2.3.9 metastore client, which does not
-reliably talk to a Hive 4 metastore, so the Hive block in `spark-defaults.conf` ships commented out.
-Once the `hive` profile is up, uncomment it and restart: the `hive-libs-init` one-shot publishes Hive's
-own jars into the `hive-libs` volume (mounted read-only at `/opt/hive-libs`) and
-`spark.sql.hive.metastore.jars.path` points Spark at them.
+**Hive integration is enabled by default.** Spark 3.5 rejects Hive 4 as an external metastore-client
+version, so it uses its bundled Thrift client with `hive.metastore.uris` pointing at the Hive 4
+service. This supports the metadata operations used by OpenRec without falling back to a local Derby
+metastore. Start the Hive profile before submitting warehouse jobs; the example cluster does this
+automatically.
 
 Submit a job:
 

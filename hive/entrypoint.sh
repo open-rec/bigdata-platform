@@ -75,8 +75,13 @@ case "${1:-metastore}" in
   publish-libs)
     target="${HIVE_LIBS_DIR:-/hive-libs}"
     mkdir -p "${target}"
-    cp -n "${HIVE_HOME}"/lib/*.jar "${target}/" 2>/dev/null || true
-    echo "$(find "${target}" -name '*.jar' | wc -l) jars in ${target}"
+    cp -n "${HIVE_HOME}"/lib/*.jar "${target}/"
+    jar_count="$(find "${target}" -name '*.jar' | wc -l)"
+    if [[ "${jar_count}" -eq 0 ]]; then
+      echo "no Hive jars were published to ${target}" >&2
+      exit 1
+    fi
+    echo "${jar_count} jars in ${target}"
     ;;
 
   beeline)

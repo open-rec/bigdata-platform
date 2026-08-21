@@ -31,7 +31,6 @@ case "${ROLE}" in
   worker)
     exec "${SPARK_HOME}/bin/spark-class" org.apache.spark.deploy.worker.Worker \
       --webui-port "${SPARK_WORKER_WEBUI_PORT:-8081}" \
-      --cores "${SPARK_WORKER_CORES:-2}" \
       --memory "${SPARK_WORKER_MEMORY:-2g}" \
       "${MASTER_URL}" "$@"
     ;;
