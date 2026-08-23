@@ -911,8 +911,8 @@ services:
 
   # =========================================================================
   # Redis — profile: redis
-  # The serving-layer store rec-server reads on every request. Key layout:
-  # recall-engine/redis/design.md.
+  # The serving-layer store rec-server reads on every request. Entity and
+  # behavior keys follow the contracts documented by rec-server.
   #
   # Single node, no password: rec-server's RedisConfig builds a plain
   # JedisConnectionFactory and rank-engine uses redis.Redis — neither is
@@ -1032,7 +1032,7 @@ services:
   # =========================================================================
   # Elasticsearch — profile: elasticsearch
   # Holds the per-scene vector index EmbeddingNode kNN-searches
-  # ({scene}-item-vector-index; see recall-engine/es/design.md).
+  # ({scene}-item-vector-index).
   #
   # TLS and auth are on because the clients require them, and the image
   # generates its own self-signed certificate on first start.

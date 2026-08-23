@@ -436,8 +436,10 @@ No password is a compatibility requirement, not laziness: `rec-server`'s `RedisC
 `example/init`'s `RedisUtil` and `rank-engine`'s client all connect without credentials, so a
 `requirepass` here would break all three. Same story for clustering — see the caveats.
 
-This is the store `example/init` seeds and every recommendation request reads. Key layout is
-`recall-engine/redis/design.md`:
+This is the store `example/init` seeds and every recommendation request reads. Online entities use
+`item:{itemId}` and `user:{userId}` strings; behavior uses
+`event:{userId}:{scene}:{type}` sorted sets; development recall tables use
+`i2i:{itemId}:{scene}`, `hot:{scene}`, and `new:{scene}` sorted sets:
 
 ```shell
 ./platform.sh shell redis
@@ -448,7 +450,8 @@ redis> zrange i2i:{item_1}:scene_0 0 -1 withscores
 ### Elasticsearch
 
 Single node on 9200 holding the per-scene vector index `EmbeddingNode` kNN-searches
-(`{scene}-item-vector-index`, `recall-engine/es/design.md`).
+(`{scene}-item-vector-index`). The online recall aliases and storage contract are documented by
+`rec-server`'s `RecallStore` section.
 
 **TLS and auth are on**, because the clients demand it: `EsConfig` (rec-server) and `EsUtil`
 (example/init) both hardcode the `https` scheme and always send basic auth. They also call
@@ -507,7 +510,7 @@ docker volume rm openrec-bigdata_namenode-data \
   launch, metadata and DDL still work; use Spark SQL for compute, or check
   `./platform.sh logs hiveserver2` for the `tez.lib.uris` it resolved.
 - **Redis is a single node, and cannot simply be made a cluster.** The key layout wraps ids in `{}`
-  hash tags so it *would* shard cleanly (see `recall-engine/redis/design.md`), but `rec-server`'s
+  hash tags so related records can share a Redis Cluster slot, but `rec-server`'s
   `RedisConfig` builds a plain `JedisConnectionFactory` and `rank-engine` uses `redis.Redis` —
   neither follows `MOVED` redirects. Redis Cluster needs a client change in those two repos first.
 - **Elasticsearch is a single node** (`discovery.type=single-node`) with a self-signed certificate.
