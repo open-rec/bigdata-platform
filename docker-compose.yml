@@ -1098,6 +1098,58 @@ services:
       retries: 12
       start_period: 10s
 
+  redis-exporter:
+    image: ${REDIS_EXPORTER_IMAGE}
+    container_name: redis-exporter
+    hostname: redis-exporter
+    profiles: ["redis"]
+    restart: unless-stopped
+    networks: [openrec-bigdata]
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis: {condition: service_healthy}
+
+  elasticsearch-exporter:
+    image: ${ELASTICSEARCH_EXPORTER_IMAGE}
+    container_name: elasticsearch-exporter
+    hostname: elasticsearch-exporter
+    profiles: ["elasticsearch"]
+    restart: unless-stopped
+    networks: [openrec-bigdata]
+    command:
+      - --es.uri=https://elastic:${ELASTIC_PASSWORD}@elasticsearch:9200
+      - --es.ssl-skip-verify
+      - --es.all
+      - --es.indices
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+
+  kafka-exporter:
+    image: ${KAFKA_EXPORTER_IMAGE}
+    container_name: kafka-exporter
+    hostname: kafka-exporter
+    profiles: ["kafka"]
+    restart: unless-stopped
+    networks: [openrec-bigdata]
+    command:
+      - --kafka.server=kafka-1:9092
+      - --kafka.server=kafka-2:9092
+      - --kafka.server=kafka-3:9092
+    depends_on:
+      kafka-init: {condition: service_completed_successfully}
+
+  blackbox-exporter:
+    image: ${BLACKBOX_EXPORTER_IMAGE}
+    container_name: blackbox-exporter
+    hostname: blackbox-exporter
+    profiles: ["hbase"]
+    restart: unless-stopped
+    networks: [openrec-bigdata]
+    command: ["--config.file=/etc/blackbox_exporter/config.yml"]
+    volumes:
+      - ./monitoring/blackbox/config.yml:/etc/blackbox_exporter/config.yml:ro
+
   grafana:
     image: ${GRAFANA_IMAGE}
     container_name: grafana

@@ -11,3 +11,37 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["rec-server:13579"]
+
+  - job_name: rank-engine
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["rank-engine:8123"]
+
+  - job_name: redis
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: elasticsearch
+    static_configs:
+      - targets: ["elasticsearch-exporter:9114"]
+
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  - job_name: hbase
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://hbase-master:16010/jmx
+          - http://hbase-regionserver-1:16030/jmx
+          - http://hbase-regionserver-2:16030/jmx
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
