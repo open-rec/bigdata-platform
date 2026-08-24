@@ -296,6 +296,7 @@ check() {
     printf 'FAILED\n'
     sed 's/^/      /' <<<"$output"
     SMOKE_FAILED=1
+    SMOKE_FAILURES+=("$label")
   fi
   # Explicit: a non-zero return here would trip `set -e` in the caller.
   return 0
@@ -360,10 +361,13 @@ sys.exit(0 if alive else 1)'
 }
 
 smoke_flink() {
-  check "flink two taskmanagers" compose exec -T flink-jobmanager bash -c \
-    'curl -fsS http://flink-jobmanager:8081/taskmanagers | grep -o '"'"'"id"'"'"' | wc -l | grep -qx 2'
-  check "flink four task slots" compose exec -T flink-jobmanager bash -c \
-    'curl -fsS http://flink-jobmanager:8081/overview | grep -Eq "slots-total[^0-9]*4"'
+  local taskmanagers="${FLINK_EXPECTED_TASKMANAGERS:-2}"
+  local slots_per_taskmanager="${FLINK_TASK_SLOTS:-2}"
+  local total_slots=$((taskmanagers * slots_per_taskmanager))
+  check "flink ${taskmanagers} taskmanagers" compose exec -T flink-jobmanager bash -c \
+    "curl -fsS http://flink-jobmanager:8081/taskmanagers | grep -o '\"id\"' | wc -l | grep -qx ${taskmanagers}"
+  check "flink ${total_slots} task slots" compose exec -T flink-jobmanager bash -c \
+    "curl -fsS http://flink-jobmanager:8081/overview | grep -Eq 'slots-total[^0-9]*${total_slots}'"
 }
 
 smoke_airflow() {
@@ -408,6 +412,7 @@ cmd_smoke() {
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
   SMOKE_FAILED=0
+  SMOKE_FAILURES=()
   local component
   for component in "${components[@]}"; do
     case "$component" in
@@ -429,6 +434,8 @@ cmd_smoke() {
     "smoke_$component"
   done
   if [[ "$SMOKE_FAILED" -ne 0 ]]; then
+    printf '\nFailed smoke checks:\n' >&2
+    printf '  - %s\n' "${SMOKE_FAILURES[@]}" >&2
     note "smoke test FAILED — see above (logs: ./platform.sh logs <service>)"
     return 1
   fi
