@@ -400,7 +400,11 @@ smoke_monitoring() {
   check "prometheus ready" compose exec -T prometheus \
     wget -q -O /dev/null http://localhost:9090/-/ready
   check "prometheus self target up" compose exec -T prometheus \
-    sh -c 'wget -q -O - '\''http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22prometheus%22%7D'\'' | grep -q '\''"value":\[[^]]*,"1"\]'\'''
+    sh -c 'attempt=0; while [ "$attempt" -lt 30 ]; do
+      wget -q -O - '\''http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22prometheus%22%7D'\'' \
+        | grep -q '\''"value":\[[^]]*,"1"\]'\'' && exit 0
+      attempt=$((attempt + 1)); sleep 1
+    done; exit 1'
   check "grafana healthy" compose exec -T grafana \
     sh -c 'wget -q -O - http://localhost:3000/api/health | grep -q '\''"database": *"ok"'\'''
 }
