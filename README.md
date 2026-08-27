@@ -6,7 +6,7 @@
 ![Spark](https://img.shields.io/badge/Spark-3.5.3-E25A1C?logo=apachespark&logoColor=white)
 ![Flink](https://img.shields.io/badge/Flink-1.14.6-E6526F?logo=apacheflink&logoColor=white)
 
-The infrastructure open-rec runs on, as one Docker Compose project with two peer deployment modes:
+The infrastructure OpenRec runs on, as one Docker Compose project with two peer deployment modes:
 
 | Mode | Components | Intended use |
 |---|---|---|
@@ -40,6 +40,10 @@ Each image takes a **role** as its argument (`namenode`, `datanode`, `broker`, `
 Postgres, the Hive metastore database, is the one component used as a stock upstream image.
 
 ## requirements
+
+> This repository provides development and integration infrastructure. Its default Compose
+> topology is not an authenticated, highly available production deployment; see [caveats](#caveats)
+> before exposing any service outside an isolated environment.
 
 - Docker with the Compose plugin (`docker compose`). The v1 `docker-compose` binary also works —
   `platform.sh` detects whichever is present.
@@ -500,11 +504,13 @@ docker volume rm openrec-bigdata_namenode-data \
 
 ## caveats
 
-- **This stack has not been run end to end in the environment it was written in** (no Docker there).
-  The compose file, config XML and scripts are statically validated; the image tags and container
-  paths are not. Run `./platform.sh pull` and `./platform.sh build` first — that is where a wrong tag
-  or a moved download URL shows up, and every version is pinned in one place (`.env`) so bumping is a
-  one-line change.
+- **Validation is split between this repository and the OpenRec distribution.** Component CI checks
+  Compose definitions, configuration, image builds, and `platform.sh` smoke tests. The
+  [`example`](https://github.com/open-rec/example) repository owns complete standalone and scheduled
+  cluster E2E coverage across the application and data planes. A successful static check does not
+  guarantee that an upstream image tag or download mirror is still reachable, so run
+  `./platform.sh pull`, `./platform.sh build <mode>`, and `./platform.sh smoke <mode>` for the exact
+  release manifest being deployed.
 - **Not a production topology.** Single namenode, single HBase master, single resourcemanager, no HA.
   Elasticsearch is the only component with TLS and authentication (because its clients insist);
   Kafka, HDFS, Hive, HBase and Redis all speak plaintext with no auth, HDFS permission checks are off
