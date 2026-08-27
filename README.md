@@ -1,5 +1,11 @@
 # bigdata-platform
 
+[![CI](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml)
+![Docker Compose](https://img.shields.io/badge/runtime-Docker_Compose-2496ED?logo=docker&logoColor=white)
+![Java](https://img.shields.io/badge/base_JRE-11-ED8B00?logo=openjdk&logoColor=white)
+![Spark](https://img.shields.io/badge/Spark-3.5.3-E25A1C?logo=apachespark&logoColor=white)
+![Flink](https://img.shields.io/badge/Flink-1.14.6-E6526F?logo=apacheflink&logoColor=white)
+
 The infrastructure open-rec runs on, as one Docker Compose project with two peer deployment modes:
 
 | Mode | Components | Intended use |
