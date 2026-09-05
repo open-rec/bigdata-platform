@@ -41,25 +41,40 @@ fi
 die() { echo "error: $*" >&2; exit 1; }
 note() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
-# Profiles a component needs, itself included. This is the whole reason this
-# script exists: compose will not infer that Hive needs HDFS.
+# A resolved component maps one-to-one to its Compose profile. Dependency
+# expansion happens once in dependency_components_for() so every lifecycle
+# command uses the same closure.
 profiles_for() {
   case "$1" in
-    zookeeper) echo "zookeeper" ;;
-    kafka)     echo "zookeeper kafka" ;;
-    hdfs)      echo "hdfs" ;;
-    yarn)      echo "hdfs yarn" ;;
-    hive)      echo "hdfs yarn hive" ;;
-    hbase)     echo "zookeeper hdfs hbase" ;;
-    spark)     echo "hdfs spark" ;;
-    flink)     echo "hdfs flink" ;;
-    airflow)   echo "airflow" ;;
-    redis)     echo "redis" ;;
-    elasticsearch) echo "elasticsearch" ;;
-    monitoring) echo "monitoring" ;;
-    all)       echo "${COMPONENTS[*]}" ;;
+    zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|monitoring)
+      echo "$1"
+      ;;
     *)         die "unknown component '$1' (valid: ${COMPONENTS[*]} all)" ;;
   esac
+}
+
+# Canonical dependency graph shared by up/build/pull/init/smoke. Output is
+# order-preserving and de-duplicated so initialization and diagnostics remain
+# predictable when several requested components share HDFS or ZooKeeper.
+dependency_components_for() {
+  local component
+  for component in "$@"; do
+    case "$component" in
+      zookeeper)     echo "zookeeper" ;;
+      kafka)         printf '%s\n' zookeeper kafka ;;
+      hdfs)          echo "hdfs" ;;
+      yarn)          printf '%s\n' hdfs yarn ;;
+      hive)          printf '%s\n' hdfs yarn hive ;;
+      hbase)         printf '%s\n' zookeeper hdfs hbase ;;
+      spark)         printf '%s\n' hdfs spark ;;
+      flink)         printf '%s\n' hdfs flink ;;
+      airflow)       echo "airflow" ;;
+      redis)         echo "redis" ;;
+      elasticsearch) echo "elasticsearch" ;;
+      monitoring)    echo "monitoring" ;;
+      *)             die "unknown component '$component' (valid: ${COMPONENTS[*]})" ;;
+    esac
+  done | awk '!seen[$0]++'
 }
 
 # Names must be checked here, in the main shell: profiles_for runs inside a
@@ -166,9 +181,10 @@ init_targets() {
 cmd_up() {
   local -a requested=("$@")
   if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
-  local -a components=()
-  mapfile -t components < <(normalize_components "${requested[@]}")
-  validate_components "${components[@]}"
+  local -a normalized=() components=()
+  mapfile -t normalized < <(normalize_components "${requested[@]}")
+  validate_components "${normalized[@]}"
+  mapfile -t components < <(dependency_components_for "${normalized[@]}")
   note "starting: ${components[*]}"
   # A locally rebuilt image makes Compose recreate its old container. Docker
   # can try to bind the replacement before the stopped container's
@@ -197,6 +213,10 @@ cmd_down() {
   fi
   local -a requested=("$@")
   if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
+  # Component-level down stops only the explicitly requested components. Its
+  # dependencies may be shared by other running components (Kafka and HBase
+  # share ZooKeeper; Hive, HBase, Spark and Flink share HDFS). Deployment modes
+  # are expanded by normalize_components and still stop their complete set.
   local -a components=()
   mapfile -t components < <(normalize_components "${requested[@]}")
   validate_components "${components[@]}"
@@ -234,9 +254,10 @@ cmd_restart() {
 cmd_build() {
   local -a requested=("$@")
   if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
-  local -a components=()
-  mapfile -t components < <(normalize_components "${requested[@]}")
-  validate_components "${components[@]}"
+  local -a normalized=() components=()
+  mapfile -t normalized < <(normalize_components "${requested[@]}")
+  validate_components "${normalized[@]}"
+  mapfile -t components < <(dependency_components_for "${normalized[@]}")
   local component target
   local -a targets=()
   for component in "${components[@]}"; do
@@ -255,9 +276,10 @@ cmd_build() {
 cmd_pull() {
   local -a requested=("$@")
   if [[ ${#requested[@]} -eq 0 ]]; then requested=(all); fi
-  local -a components=()
-  mapfile -t components < <(normalize_components "${requested[@]}")
-  validate_components "${components[@]}"
+  local -a normalized=() components=()
+  mapfile -t normalized < <(normalize_components "${requested[@]}")
+  validate_components "${normalized[@]}"
+  mapfile -t components < <(dependency_components_for "${normalized[@]}")
   note "pulling third-party images for: ${components[*]} (locally built ones are skipped)"
   # --ignore-buildable landed in a later Compose 2.x. Detect it up front so
   # normal pull progress and genuine registry errors are never hidden.
@@ -273,9 +295,10 @@ cmd_pull() {
 cmd_init() {
   local -a requested=("$@")
   if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
-  local -a components=()
-  mapfile -t components < <(normalize_components "${requested[@]}")
-  validate_components "${components[@]}"
+  local -a normalized=() components=()
+  mapfile -t normalized < <(normalize_components "${requested[@]}")
+  validate_components "${normalized[@]}"
+  mapfile -t components < <(dependency_components_for "${normalized[@]}")
   local component target
   for component in "${components[@]}"; do
     for target in $(init_targets "$component"); do
@@ -324,8 +347,6 @@ smoke_hdfs() {
     hdfs dfs -test -d /user/hive/warehouse
   check "hdfs spark-logs dir" compose exec -T namenode \
     hdfs dfs -test -d /spark-logs
-  check "hdfs Tez runtime archive" compose exec -T namenode \
-    hdfs dfs -test -e /apps/tez/tez.tar.gz
   check "hdfs openrec feature dirs" compose exec -T namenode \
     hdfs dfs -test -d /openrec/checkpoints/flink
 }
@@ -336,6 +357,8 @@ smoke_yarn() {
 }
 
 smoke_hive() {
+  check "hdfs Tez runtime archive" compose exec -T namenode \
+    hdfs dfs -test -e /apps/tez/tez.tar.gz
   check "hiveserver2 query" compose exec -T hiveserver2 \
     /opt/hive/bin/beeline -u jdbc:hive2://hiveserver2:10000 -n hive --silent=true -e 'show databases;'
   # Metadata-only statements do not start Tez. A temporary table keeps this
@@ -409,31 +432,53 @@ smoke_monitoring() {
     sh -c 'wget -q -O - http://localhost:3000/api/health | grep -q '\''"database": *"ok"'\'''
 }
 
+component_running() {
+  case "$1" in
+    zookeeper)
+      running zookeeper-1 && running zookeeper-2 && running zookeeper-3 ;;
+    kafka)
+      running kafka-1 && running kafka-2 && running kafka-3 && running kafka-exporter ;;
+    hdfs)
+      running namenode && running datanode-1 && running datanode-2 ;;
+    yarn)
+      running resourcemanager && running nodemanager-1 && running nodemanager-2 ;;
+    hive)
+      running hive-metastore-db && running hive-metastore && running hiveserver2 ;;
+    hbase)
+      running hbase-master && running hbase-regionserver-1 \
+        && running hbase-regionserver-2 && running hbase-thrift && running blackbox-exporter ;;
+    spark)
+      running spark-master && running spark-worker-1 && running spark-worker-2 \
+        && running spark-history && running jupyterlab ;;
+    flink)
+      running flink-jobmanager && running flink-taskmanager-1 && running flink-taskmanager-2 ;;
+    airflow)
+      running airflow-db && running airflow-api-server && running airflow-scheduler \
+        && running airflow-dag-processor ;;
+    redis) running redis && running redis-exporter ;;
+    elasticsearch) running elasticsearch && running elasticsearch-exporter ;;
+    monitoring) running prometheus && running grafana ;;
+    *) die "unknown component '$1'" ;;
+  esac
+}
+
 cmd_smoke() {
   local -a requested=("$@")
   if [[ ${#requested[@]} -eq 0 ]]; then requested=(standalone); fi
-  local -a components=()
-  mapfile -t components < <(normalize_components "${requested[@]}")
-  validate_components "${components[@]}"
+  local -a normalized=() components=()
+  mapfile -t normalized < <(normalize_components "${requested[@]}")
+  validate_components "${normalized[@]}"
+  mapfile -t components < <(dependency_components_for "${normalized[@]}")
   SMOKE_FAILED=0
   SMOKE_FAILURES=()
   local component
   for component in "${components[@]}"; do
-    case "$component" in
-      zookeeper) running zookeeper-1   || { note "zookeeper: not running, skipped"; continue; } ;;
-      kafka)     running kafka-1       || { note "kafka: not running, skipped"; continue; } ;;
-      hdfs)      running namenode      || { note "hdfs: not running, skipped"; continue; } ;;
-      yarn)      running resourcemanager || { note "yarn: not running, skipped"; continue; } ;;
-      hive)      running hiveserver2   || { note "hive: not running, skipped"; continue; } ;;
-      hbase)     running hbase-master  || { note "hbase: not running, skipped"; continue; } ;;
-      spark)     running spark-master  || { note "spark: not running, skipped"; continue; } ;;
-      flink)     running flink-jobmanager || { note "flink: not running, skipped"; continue; } ;;
-      airflow)   running airflow-api-server || { note "airflow: not running, skipped"; continue; } ;;
-      redis)     running redis         || { note "redis: not running, skipped"; continue; } ;;
-      elasticsearch) running elasticsearch || { note "elasticsearch: not running, skipped"; continue; } ;;
-      monitoring) running prometheus && running grafana || { note "monitoring: not running, skipped"; continue; } ;;
-      *)         die "unknown component '$component'" ;;
-    esac
+    if ! component_running "$component"; then
+      note "$component: required service is not running"
+      SMOKE_FAILED=1
+      SMOKE_FAILURES+=("$component is not running")
+      continue
+    fi
     note "$component"
     "smoke_$component"
   done
@@ -490,11 +535,14 @@ modes:
 components: ${COMPONENTS[*]}
 compatibility aliases: storage (= standalone), all (= cluster), es (= elasticsearch)
 
-dependency closures (what 'up <component>' actually starts):
+dependency closures (used by up/build/pull/init/smoke):
   kafka -> zookeeper kafka          hive  -> hdfs yarn hive
   yarn  -> hdfs yarn                hbase -> zookeeper hdfs hbase
   spark -> hdfs spark               flink -> hdfs flink
   airflow, redis, elasticsearch, monitoring -> themselves
+
+Component-level down stops only the named component; down standalone/cluster
+stops every component in that deployment mode.
 EOF
 }
 

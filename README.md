@@ -94,7 +94,7 @@ Stop only the selected mode with `./platform.sh down standalone` or `./platform.
 ```
 
 The point of the wrapper is the dependency closure — Compose will not work out that a Hive warehouse
-needs HDFS:
+needs HDFS. `up`, `build`, `pull`, `init`, and `smoke` use the same closure:
 
 | `up <component>` | actually starts |
 |---|---|
@@ -152,7 +152,9 @@ different local retention window is required.
 ### lifecycle examples
 
 `platform.sh` is the single lifecycle entry point for modes and individual components. The same
-target is accepted by `up`, `down`, `build`, `pull`, `init`, and `smoke` where applicable:
+target is accepted by `up`, `down`, `build`, `pull`, `init`, and `smoke` where applicable. Startup,
+build, initialization, and verification include dependencies; component-level `down` stops only the
+named component so shared HDFS or ZooKeeper services are not disrupted:
 
 ```shell
 # Complete recommendation infrastructure modes.
@@ -171,8 +173,9 @@ target is accepted by `up`, `down`, `build`, `pull`, `init`, and `smoke` where a
 ./platform.sh down kafka airflow redis
 ```
 
-`down` only stops containers and preserves named volumes. Use the deliberately global
-`./platform.sh down -v` only when all platform data should be deleted.
+Mode-level `down standalone` and `down cluster` stop every component in that mode. All `down`
+commands preserve named volumes. Use the deliberately global `./platform.sh down -v` only when all
+platform data should be deleted.
 
 ## deploying a component on its own
 
