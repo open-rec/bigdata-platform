@@ -429,7 +429,13 @@ smoke_monitoring() {
       attempt=$((attempt + 1)); sleep 1
     done; exit 1'
   check "grafana healthy" compose exec -T grafana \
-    sh -c 'wget -q -O - http://localhost:3000/api/health | grep -q '\''"database": *"ok"'\'''
+    sh -c 'attempt=0; while [ "$attempt" -lt 30 ]; do
+      wget -q -O - http://localhost:3000/api/health 2>/dev/null \
+        | grep -q '\''"database": *"ok"'\'' && exit 0
+      attempt=$((attempt + 1)); sleep 1
+    done
+    echo "Grafana health endpoint was not ready after 30 seconds" >&2
+    exit 1'
 }
 
 component_running() {
