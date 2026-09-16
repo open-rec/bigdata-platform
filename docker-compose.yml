@@ -520,6 +520,9 @@ services:
     hostname: nodemanager-1
     profiles: ["yarn"]
     command: ["nodemanager"]
+    environment:
+      YARN_DISK_MAX_UTILIZATION_PERCENTAGE: ${YARN_DISK_MAX_UTILIZATION_PERCENTAGE:-99.0}
+      YARN_DISK_MIN_FREE_MB: ${YARN_DISK_MIN_FREE_MB:-10240}
     depends_on:
       resourcemanager: {condition: service_healthy}
     ports:
@@ -537,6 +540,9 @@ services:
     hostname: nodemanager-2
     profiles: ["yarn"]
     command: ["nodemanager"]
+    environment:
+      YARN_DISK_MAX_UTILIZATION_PERCENTAGE: ${YARN_DISK_MAX_UTILIZATION_PERCENTAGE:-99.0}
+      YARN_DISK_MIN_FREE_MB: ${YARN_DISK_MIN_FREE_MB:-10240}
     depends_on:
       resourcemanager: {condition: service_healthy}
     ports:
@@ -1054,6 +1060,9 @@ services:
       # as well would duplicate it and stop the node from starting.
       ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
       ES_JAVA_OPTS: ${ELASTIC_HEAP}
+      OPENREC_ES_DISK_LOW: ${OPENREC_ES_DISK_LOW:-}
+      OPENREC_ES_DISK_HIGH: ${OPENREC_ES_DISK_HIGH:-}
+      OPENREC_ES_DISK_FLOOD: ${OPENREC_ES_DISK_FLOOD:-}
     ulimits:
       memlock: {soft: -1, hard: -1}
       nofile: {soft: 65536, hard: 65536}

@@ -54,7 +54,18 @@ case "${1:-server}" in
   server)
     generate_certs
     # eswrapper is the argument the stock entrypoint expects for "run the node".
-    exec /usr/local/bin/docker-entrypoint.sh eswrapper
+    disk_options=()
+    if [[ -n "${OPENREC_ES_DISK_LOW:-}${OPENREC_ES_DISK_HIGH:-}${OPENREC_ES_DISK_FLOOD:-}" ]]; then
+      : "${OPENREC_ES_DISK_LOW:?set all three disk watermarks}"
+      : "${OPENREC_ES_DISK_HIGH:?set all three disk watermarks}"
+      : "${OPENREC_ES_DISK_FLOOD:?set all three disk watermarks}"
+      disk_options=(
+        "-Ecluster.routing.allocation.disk.watermark.low=${OPENREC_ES_DISK_LOW}"
+        "-Ecluster.routing.allocation.disk.watermark.high=${OPENREC_ES_DISK_HIGH}"
+        "-Ecluster.routing.allocation.disk.watermark.flood_stage=${OPENREC_ES_DISK_FLOOD}"
+      )
+    fi
+    exec /usr/local/bin/docker-entrypoint.sh eswrapper "${disk_options[@]}"
     ;;
   certs)
     generate_certs

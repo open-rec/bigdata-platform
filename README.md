@@ -535,3 +535,18 @@ docker volume rm openrec-bigdata_namenode-data \
 - **No Kibana.** Query Elasticsearch with `curl -k -u elastic:<password>` or from the client code.
 - **Feature processing lives in `data-processor`.** Its Spark 3.5 and Flink 1.14 jobs consume Kafka,
   update Redis, and persist raw data plus feature snapshots to HDFS for offline training.
+
+### YARN scratch disk thresholds
+
+NodeManagers retain disk health checks. The default utilization limit is 99%,
+with at least 10240 MB free per local/log disk. On large shared Docker storage,
+configure `YARN_DISK_MAX_UTILIZATION_PERCENTAGE` and `YARN_DISK_MIN_FREE_MB` when
+starting the platform. For example, a local validation host can use 99.99% with
+10240 MB free. Inspect the NodeManager health report before changing these values;
+this does not make a full disk usable or disable the free-space guard.
+
+Elasticsearch can likewise use explicit free-space watermarks by setting all of
+`OPENREC_ES_DISK_LOW`, `OPENREC_ES_DISK_HIGH`, and `OPENREC_ES_DISK_FLOOD`
+(e.g. `20gb`, `15gb`, `10gb`). Unset values preserve Elasticsearch defaults.
+These settings retain allocation and flood-stage protection; they do not disable
+it. Existing flood-stage blocks clear after the disk monitor observes recovery.

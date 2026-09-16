@@ -71,6 +71,16 @@ case "${ROLE}" in
     ;;
 
   nodemanager)
+    disk_limit="${YARN_DISK_MAX_UTILIZATION_PERCENTAGE:-99.0}"
+    free_mb="${YARN_DISK_MIN_FREE_MB:-10240}"
+    [[ "${disk_limit}" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+      && awk "BEGIN {exit !(${disk_limit} > 0 && ${disk_limit} <= 100)}" \
+      && [[ "${free_mb}" =~ ^[0-9]+$ ]] \
+      || { echo "invalid YARN disk health thresholds" >&2; exit 2; }
+    sed -i "/<name>yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage<\/name>/{n;s|<value>.*</value>|<value>${disk_limit}</value>|;}" \
+      "${HADOOP_CONF_DIR}/yarn-site.xml"
+    sed -i "/<name>yarn.nodemanager.disk-health-checker.min-free-space-per-disk-mb<\/name>/{n;s|<value>.*</value>|<value>${free_mb}</value>|;}" \
+      "${HADOOP_CONF_DIR}/yarn-site.xml"
     exec "${HADOOP_HOME}/bin/yarn" nodemanager
     ;;
 
