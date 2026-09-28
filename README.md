@@ -361,6 +361,12 @@ depends on *that* completing rather than on the namenode being up, because "name
 
 ### Hive
 
+HiveServer2 keeps its PID marker in `/tmp/openrec-hiveserver2` by default,
+not in the mounted configuration directory. The entrypoint clears a marker
+that points to the launcher itself (typically PID 1 after a container restart),
+preventing a stale marker from causing a restart loop. `HIVESERVER2_PID_DIR`
+can override this location.
+
 Metadata in Postgres, warehouse on HDFS at `/user/hive/warehouse`. `hive/conf/hive-site.xml` is baked
 into `openrec/hive` (and bind-mounted over in compose, so edits need only a restart). The roles are
 plain Hive commands — `hive --service metastore`, `hive --service hiveserver2`, `schematool` — rather

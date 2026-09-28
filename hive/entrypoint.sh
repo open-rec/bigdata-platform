@@ -63,6 +63,15 @@ case "${1:-metastore}" in
 
   hiveserver2)
     publish_tez
+    # Hive otherwise writes its PID into the mounted configuration directory.
+    # After a container restart PID 1 belongs to this launcher, so a leftover
+    # PID 1 marker incorrectly prevents HiveServer2 from starting again.
+    export HIVESERVER2_PID_DIR="${HIVESERVER2_PID_DIR:-/tmp/openrec-hiveserver2}"
+    mkdir -p "${HIVESERVER2_PID_DIR}"
+    pid_file="${HIVESERVER2_PID_DIR}/hiveserver2.pid"
+    if [[ -f "${pid_file}" && "$(cat "${pid_file}")" == "$$" ]]; then
+      rm -f "${pid_file}"
+    fi
     exec "${HIVE_HOME}/bin/hive" --service hiveserver2
     ;;
 
