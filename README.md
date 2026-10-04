@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml)
 ![Docker Compose](https://img.shields.io/badge/runtime-Docker_Compose-2496ED?logo=docker&logoColor=white)
-![Java](https://img.shields.io/badge/base_JRE-11-ED8B00?logo=openjdk&logoColor=white)
+![Spark and Flink Java](https://img.shields.io/badge/Spark%20%2F%20Flink_Java-21-ED8B00?logo=openjdk&logoColor=white)
+![ZooKeeper, Kafka and HBase JRE](https://img.shields.io/badge/ZooKeeper%20%2F%20Kafka%20%2F%20HBase_JRE-11-ED8B00?logo=openjdk&logoColor=white)
 ![Spark](https://img.shields.io/badge/Spark-4.0.4-E25A1C?logo=apachespark&logoColor=white)
 ![Flink](https://img.shields.io/badge/Flink-2.2.1-E6526F?logo=apacheflink&logoColor=white)
 
