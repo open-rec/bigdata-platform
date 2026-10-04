@@ -13,20 +13,20 @@
 #
 # One image, several roles (see entrypoint.sh):
 #
-#   docker build -t openrec/spark:3.5.3 ./spark
-#   docker run -d --name spark-master -p 8080:8080 -p 7077:7077 openrec/spark:3.5.3 master
+#   docker build -t openrec/spark:4.0.4 ./spark
+#   docker run -d --name spark-master -p 8080:8080 -p 7077:7077 openrec/spark:4.0.4 master
 #   docker run -d --name spark-worker -e SPARK_MASTER_URL=spark://spark-master:7077 \
-#     openrec/spark:3.5.3 worker
-#   docker run --rm openrec/spark:3.5.3 submit /opt/workspace/job.py
+#     openrec/spark:4.0.4 worker
+#   docker run --rm openrec/spark:4.0.4 submit /opt/workspace/job.py
 # ---------------------------------------------------------------------------
 
-ARG SPARK_BASE_IMAGE=apache/spark:3.5.3-python3
+ARG SPARK_BASE_IMAGE=spark:4.0.4-scala2.13-java21-python3-ubuntu
 
 FROM curlimages/curl:latest AS jars
-ARG SPARK_VERSION=3.5.3
-ARG SCALA_BINARY=2.12
-ARG KAFKA_CLIENTS_VERSION=3.4.1
-ARG COMMONS_POOL2_VERSION=2.11.1
+ARG SPARK_VERSION=4.0.4
+ARG SCALA_BINARY=2.13
+ARG KAFKA_CLIENTS_VERSION=3.9.1
+ARG COMMONS_POOL2_VERSION=2.12.0
 ENV MAVEN=https://repo1.maven.org/maven2
 RUN set -eux; \
     mkdir -p /tmp/jars; \

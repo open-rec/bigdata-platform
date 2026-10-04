@@ -24,3 +24,26 @@ jobs:
           find . -path './.git' -prune -o -name '*.sh' -type f -exec bash -n {} +
       - name: Validate Compose configuration
         run: docker compose config --quiet
+
+  java21-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [spark, flink]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build upgraded engine image
+        run: docker build -t openrec/${{ matrix.component }}:ci ./${{ matrix.component }}
+      - name: Verify Java runtime and engine launch
+        env:
+          ENGINE: ${{ matrix.component }}
+        run: |
+          docker run --rm --entrypoint java "openrec/${ENGINE}:ci" -version 2>&1 | tee java-version.txt
+          grep -Eq 'version "21\.' java-version.txt
+          if [[ "$ENGINE" == spark ]]; then
+            docker run --rm "openrec/${ENGINE}:ci" /opt/spark/bin/spark-submit --version
+          else
+            docker run --rm "openrec/${ENGINE}:ci" /opt/flink/bin/flink --version
+          fi

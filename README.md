@@ -3,8 +3,8 @@
 [![CI](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml)
 ![Docker Compose](https://img.shields.io/badge/runtime-Docker_Compose-2496ED?logo=docker&logoColor=white)
 ![Java](https://img.shields.io/badge/base_JRE-11-ED8B00?logo=openjdk&logoColor=white)
-![Spark](https://img.shields.io/badge/Spark-3.5.3-E25A1C?logo=apachespark&logoColor=white)
-![Flink](https://img.shields.io/badge/Flink-1.14.6-E6526F?logo=apacheflink&logoColor=white)
+![Spark](https://img.shields.io/badge/Spark-4.0.4-E25A1C?logo=apachespark&logoColor=white)
+![Flink](https://img.shields.io/badge/Flink-2.2.1-E6526F?logo=apacheflink&logoColor=white)
 
 The infrastructure OpenRec runs on, as one Docker Compose project with two peer deployment modes:
 
@@ -556,3 +556,20 @@ Elasticsearch can likewise use explicit free-space watermarks by setting all of
 (e.g. `20gb`, `15gb`, `10gb`). Unset values preserve Elasticsearch defaults.
 These settings retain allocation and flood-stage protection; they do not disable
 it. Existing flood-stage blocks clear after the disk monitor observes recovery.
+
+## Java 21 engine compatibility
+
+Spark 4.0.4 (Scala 2.13) and Flink 2.2.1 images run on Java 21. Upgrade the matching
+data-processor jars and rec-algorithm runner together. Kafka broker 3.7.1, HDFS 3.3.6,
+Hive 4.0.1 and HBase 2.5.10 remain independent services with their existing JVMs;
+real Kafka, HDFS, Hive metastore and HBase integration checks passed from the new engines.
+Flink Java 21 support remains experimental upstream.
+
+The Flink image supplies shaded Hadoop 3.4.1 clients and preserves upstream JVM module
+arguments when merging `flink/conf/flink-conf.yaml` into Flink 2's `config.yaml`.
+Do not inject the old Hadoop 2 uber jar or Flink 1.14 RocksDB/JNI jars.
+
+Building new images does not migrate running streaming state. Before recreating an existing
+engine cluster, stop submissions, drain jobs, preserve old images and back up checkpoints.
+Do not let two engines write the same checkpoint. Follow the distribution
+[rollout and rollback procedure](https://github.com/open-rec/openrec/blob/master/docs/java21-processors-web-migration.md).

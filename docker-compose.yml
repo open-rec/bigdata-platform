@@ -143,9 +143,7 @@ x-flink: &flink-image
     context: ./flink
     args:
       FLINK_BASE_IMAGE: ${FLINK_BASE_IMAGE}
-      FLINK_VERSION: ${FLINK_VERSION}
-      FLINK_HADOOP_UBER_VERSION: ${FLINK_HADOOP_UBER_VERSION}
-      FROCKSDBJNI_VERSION: ${FROCKSDBJNI_VERSION}
+      HADOOP_CLIENT_VERSION: ${FLINK_HADOOP_CLIENT_VERSION}
   restart: unless-stopped
   networks: [openrec-bigdata]
 

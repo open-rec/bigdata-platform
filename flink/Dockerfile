@@ -1,22 +1,27 @@
-ARG FLINK_BASE_IMAGE=flink:1.14.6-scala_2.12-java8
+ARG FLINK_BASE_IMAGE=flink:2.2.1-java21
 FROM ${FLINK_BASE_IMAGE}
 
-ARG FLINK_HADOOP_UBER_VERSION=2.8.3-10.0
-ARG FLINK_VERSION=1.14.6
-ARG FROCKSDBJNI_VERSION=6.20.3-ververica-1.0
+ARG HADOOP_CLIENT_VERSION=3.4.1
 
 USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL -o /opt/flink/lib/flink-shaded-hadoop-2-uber.jar \
-      "https://repo1.maven.org/maven2/org/apache/flink/flink-shaded-hadoop-2-uber/${FLINK_HADOOP_UBER_VERSION}/flink-shaded-hadoop-2-uber-${FLINK_HADOOP_UBER_VERSION}.jar" \
-    && test -s /opt/flink/lib/flink-shaded-hadoop-2-uber.jar \
-    && curl -fsSL -o /opt/flink/lib/flink-statebackend-rocksdb.jar \
-      "https://repo1.maven.org/maven2/org/apache/flink/flink-statebackend-rocksdb_2.12/${FLINK_VERSION}/flink-statebackend-rocksdb_2.12-${FLINK_VERSION}.jar" \
-    && test -s /opt/flink/lib/flink-statebackend-rocksdb.jar \
-    && curl -fsSL -o /opt/flink/lib/frocksdbjni.jar \
-      "https://repo1.maven.org/maven2/com/ververica/frocksdbjni/${FROCKSDBJNI_VERSION}/frocksdbjni-${FROCKSDBJNI_VERSION}.jar" \
-    && test -s /opt/flink/lib/frocksdbjni.jar
-COPY conf/flink-conf.yaml /opt/flink/conf/flink-conf.yaml
+# Hadoop's shaded client avoids bringing a second copy of Flink's dependencies.
+# RocksDB is included in flink-dist in Flink 2; do not inject the old 1.14 backend.
+RUN set -eu; for artifact in hadoop-client-api hadoop-client-runtime; do \
+      curl --retry 3 -fsSL -o "/opt/flink/lib/${artifact}-${HADOOP_CLIENT_VERSION}.jar" \
+        "https://repo.maven.apache.org/maven2/org/apache/hadoop/${artifact}/${HADOOP_CLIENT_VERSION}/${artifact}-${HADOOP_CLIENT_VERSION}.jar"; \
+    done \
+    && curl --retry 3 -fsSL -o /opt/flink/lib/commons-logging-1.3.4.jar \
+      https://repo.maven.apache.org/maven2/commons-logging/commons-logging/1.3.4/commons-logging-1.3.4.jar
+COPY conf/flink-conf.yaml /tmp/openrec-flink.properties
+# Merge into the upstream YAML; retain all upstream Java module opens/exports.
+RUN set -eu; set --; \
+    while IFS= read -r line; do \
+      case "$line" in ''|'#'*) continue ;; esac; \
+      key="${line%%:*}"; value="${line#*: }"; set -- "$@" -D"${key}=${value}"; \
+    done < /tmp/openrec-flink.properties; \
+    /opt/flink/bin/config-parser-utils.sh /opt/flink/conf /opt/flink/bin /opt/flink/lib "$@"; \
+    chown flink:flink /opt/flink/conf/config.yaml
 USER flink
