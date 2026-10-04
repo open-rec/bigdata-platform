@@ -54,7 +54,7 @@ Postgres, the Hive metastore database, is the one component used as a stock upst
   `sudo sysctl -w vm.max_map_count=262144`.
 - Outbound network on first run: every image is built locally, pulling the upstream bases plus the
   ZooKeeper, Kafka and HBase release tarballs from the configured mainland mirror, Hive's Postgres JDBC driver
-  Spark's Kafka connector jars, and Flink's Hadoop compatibility jar from Maven Central.
+  Spark's Kafka connector jars, and Flink's shaded Hadoop client jars from Maven Central.
 
 ## quick start
 
@@ -413,9 +413,9 @@ services, no rebuild:
 ./platform.sh restart spark-master spark-worker-1 spark-worker-2 spark-history jupyterlab
 ```
 
-**Hive integration is enabled by default.** Spark 3.5 rejects Hive 4 as an external metastore-client
-version, so it uses its bundled Thrift client with `hive.metastore.uris` pointing at the Hive 4
-service. This supports the metadata operations used by OpenRec without falling back to a local Derby
+**Hive integration is enabled by default.** Spark 4.0.4 uses its bundled Thrift client with
+`hive.metastore.uris` pointing at the Hive 4 service. This configuration supports the metadata
+operations used by OpenRec without falling back to a local Derby
 metastore. Start the Hive profile before submitting warehouse jobs; the example cluster does this
 automatically.
 
@@ -430,7 +430,7 @@ docker exec -it spark-master /opt/spark/bin/spark-submit \
 
 ### Flink
 
-Flink 1.14 runs one JobManager and two TaskManagers with two slots each. It is parallel to Spark:
+Flink 2.2.1 runs one JobManager and two TaskManagers with two slots each. It is parallel to Spark:
 both are part of Cluster mode, but deploy a given streaming job to only one engine. Checkpoints and
 savepoints use HDFS paths under `/openrec/checkpoints/flink` and `/openrec/savepoints/flink`.
 
@@ -443,8 +443,9 @@ docker exec flink-jobmanager flink run -d \
 ```
 
 Open `http://localhost:8087` to inspect jobs, checkpoints and TaskManagers. The image includes the
-Hadoop compatibility jar required by the HDFS sinks. Runtime configuration is baked from
-`flink/conf/flink-conf.yaml`; rebuild with `./platform.sh build flink` after changing it.
+shaded Hadoop 3.4.1 client jars required by the HDFS sinks. Image construction merges
+`flink/conf/flink-conf.yaml` into the upstream `config.yaml`, preserving its JVM module arguments;
+rebuild with `./platform.sh build flink` after changing it.
 
 ### Redis
 
@@ -540,7 +541,7 @@ docker volume rm openrec-bigdata_namenode-data \
   single-node discovery setting; `elasticsearch/entrypoint.sh` and `elasticsearch/conf/elasticsearch.yml`
   are the places to extend.
 - **No Kibana.** Query Elasticsearch with `curl -k -u elastic:<password>` or from the client code.
-- **Feature processing lives in `data-processor`.** Its Spark 3.5 and Flink 1.14 jobs consume Kafka,
+- **Feature processing lives in `data-processor`.** Its Spark 4.0.4 and Flink 2.2.1 jobs consume Kafka,
   update Redis, and persist raw data plus feature snapshots to HDFS for offline training.
 
 ### YARN scratch disk thresholds
