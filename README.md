@@ -1,5 +1,7 @@
 # bigdata-platform
 
+[Release v0.1.0](RELEASE_NOTES.md) · [Changelog](CHANGELOG.md)
+
 [![CI](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml)
 ![Docker Compose](https://img.shields.io/badge/runtime-Docker_Compose-2496ED?logo=docker&logoColor=white)
 ![Spark and Flink Java](https://img.shields.io/badge/Spark%20%2F%20Flink_Java-21-ED8B00?logo=openjdk&logoColor=white)
@@ -331,7 +333,7 @@ Seed the serving layer with the standalone loader:
 
 ```shell
 cd ../example
-java -cp init/target/rec-example-init-1.0-SNAPSHOT-jar-with-dependencies.jar \
+java -cp init/target/rec-example-init-0.1.0-jar-with-dependencies.jar \
   com.openrec.example.InitStandalone 127.0.0.1 6380 127.0.0.1 9200 elastic 'openrec-es-password'
 ```
 
@@ -436,7 +438,7 @@ savepoints use HDFS paths under `/openrec/checkpoints/flink` and `/openrec/savep
 
 ```shell
 ./platform.sh up flink
-docker cp ../data-processor/flink/target/rec-flink-1.0-SNAPSHOT.jar \
+docker cp ../data-processor/flink/target/rec-flink-0.1.0.jar \
   flink-jobmanager:/opt/flink/jobs/openrec-features.jar
 docker exec flink-jobmanager flink run -d \
   -c com.openrec.dp.flink.DpJob /opt/flink/jobs/openrec-features.jar
@@ -578,3 +580,7 @@ Building new images does not migrate running streaming state. Before recreating 
 engine cluster, stop submissions, drain jobs, preserve old images and back up checkpoints.
 Do not let two engines write the same checkpoint. Follow the distribution
 [rollout and rollback procedure](https://github.com/open-rec/openrec/blob/master/docs/java21-processors-web-migration.md).
+
+## License
+
+OpenRec infrastructure source is licensed under [Apache-2.0](LICENSE). Upstream images and bundled third-party software retain their own licenses.
