@@ -12,6 +12,9 @@ It intentionally has no Celery broker or permanent worker pool. Add version-cont
 set `AIRFLOW_DAGS_PATH` to an absolute host path before `platform.sh up` to supply its own DAGs
 without making this generic platform depend on that project.
 
+`SERVING_GRAPH_TOKEN` is passed to Airflow task processes for the authenticated recommendation
+warmup call. When overriding it, use the same value for rec-server and the platform deployment.
+
 ```shell
 ./platform.sh pull airflow
 ./platform.sh up airflow
