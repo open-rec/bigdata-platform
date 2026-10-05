@@ -15,7 +15,7 @@ The infrastructure OpenRec runs on, as one Docker Compose project with two peer 
 | `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Flink, Airflow, Redis, Elasticsearch, Prometheus, Grafana | distributed ingestion, storage, scheduling, online/offline processing, and observability |
 
 Standalone is the complete small-data mode described by
-[example_standalone](https://github.com/open-rec/example/tree/master/example_standalone), not a
+[example_standalone](https://github.com/open-rec/openrec/tree/master/example_standalone), not a
 partially started Cluster. Both modes share the serving-store contracts, images, and tooling.
 
 **Each component is its own image, built from its own Dockerfile with its configuration baked in.**
@@ -31,7 +31,7 @@ Each image takes a **role** as its argument (`namenode`, `datanode`, `broker`, `
 | HDFS + YARN | storage and compute layer under Hive, HBase and Spark | `openrec/hadoop` (`apache/hadoop`) | `namenode`, `datanode`, `resourcemanager`, `nodemanager`, `historyserver`, `init` |
 | Hive | the warehouse: SQL and a metastore over HDFS, the data source for offline training | `openrec/hive` (`apache/hive`) | `metastore`, `hiveserver2`, `schematool`, `publish-libs`, `beeline` |
 | HBase | random-access KV store for large-scale point lookups | `openrec/hbase` (Apache tarball) | `master`, `regionserver`, `thrift`, `rest` |
-| Spark | batch and structured-streaming compute, Kafka connector included | `openrec/spark` (`apache/spark`) | `master`, `worker`, `history`, `jupyter`, `submit`, `sql` |
+| Spark | batch and structured-streaming compute, Kafka connector included | `openrec/spark` (`spark:4.0.4-scala2.13-java21-python3-ubuntu`) | `master`, `worker`, `history`, `jupyter`, `submit`, `sql` |
 | Flink | stateful streaming compute with HDFS checkpoints | `openrec/flink` (`flink`) | `jobmanager`, `taskmanager` |
 | Airflow | lightweight daily Hive/Spark workflow orchestration | `apache/airflow` via DaoCloud's Docker Hub mirror | `api-server`, `scheduler`, `dag-processor`, `init` |
 | Redis | serving-layer KV store: recall tables, user/item rows, events | `openrec/redis` (`redis`) | — |
@@ -517,7 +517,7 @@ docker volume rm openrec-bigdata_namenode-data \
 
 - **Validation is split between this repository and the OpenRec distribution.** Component CI checks
   Compose definitions, configuration, image builds, and `platform.sh` smoke tests. The
-  [`example`](https://github.com/open-rec/example) repository owns complete standalone and scheduled
+  [`example`](https://github.com/open-rec/openrec) repository owns complete standalone and scheduled
   cluster E2E coverage across the application and data planes. A successful static check does not
   guarantee that an upstream image tag or download mirror is still reachable, so run
   `./platform.sh pull`, `./platform.sh build <mode>`, and `./platform.sh smoke <mode>` for the exact
@@ -562,8 +562,11 @@ it. Existing flood-stage blocks clear after the disk monitor observes recovery.
 ## Java 21 engine compatibility
 
 Spark 4.0.4 (Scala 2.13) and Flink 2.2.1 images run on Java 21. Upgrade the matching
-data-processor jars and rec-algorithm runner together. Kafka broker 3.7.1, HDFS 3.3.6,
-Hive 4.0.1 and HBase 2.5.10 remain independent services with their existing JVMs;
+data-processor jars and rec-algorithm runner together. All OpenRec Java application/library
+artifacts also require Java 21; this does not imply a platform-wide daemon JVM replacement.
+ZooKeeper 3.9.2 and Kafka 3.7.1 use `JRE_BASE_IMAGE=eclipse-temurin:11-jre-jammy`, while
+Compose passes that same image to HBase 2.5.10 through the `HBASE_JDK_IMAGE` build argument. The JRE 11 badge describes
+these services. HDFS 3.3.6 and Hive 4.0.1 retain the JVMs in their upstream base images;
 real Kafka, HDFS, Hive metastore and HBase integration checks passed from the new engines.
 Flink Java 21 support remains experimental upstream.
 
