@@ -307,8 +307,20 @@ docker exec -it kafka-1 kafka-console-consumer \
   --bootstrap-server kafka-1:9092 --topic event --from-beginning
 ```
 
-The payloads are Gson-serialised field-for-field from `rec-server`'s `Item` / `User` / `Event` model
-classes, so the JSON keys are camelCase (`userId`, `itemId`, `pubTime`, `isLogin`, `extFields`).
+Current producers send a version 1 mutation envelope, serialized through rec-server's Jackson 3
+JSON utility. Entity fields are nested under `data` and retain camelCase names
+(`userId`, `itemId`, `pubTime`, `isLogin`, `extFields`), for example:
+
+```json
+{"schemaVersion":1,"entityType":"item","operation":"UPDATE","occurredAt":1792022400000,"data":{"id":"item_1","scene":"scene_0","status":1}}
+```
+
+`occurredAt` is the mutation timestamp in milliseconds; entity business-time fields retain their
+own contract. Kafka ordering keys are item ID for items, user ID for users, and source user ID
+for events. Consumers must process `operation`, including user/item tombstones, rather than
+interpreting the envelope as a bare entity. data-processor also accepts legacy bare-entity JSON
+as INSERT for compatibility. Public event DELETE is rejected in cluster mode; downstream event
+tombstone handling is a separate consumer capability.
 
 If you run a consumer or a Spark job **inside** this network, use the internal broker addresses; join
 the network with `--network openrec-bigdata`.
