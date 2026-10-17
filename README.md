@@ -596,3 +596,9 @@ Do not let two engines write the same checkpoint. Follow the distribution
 ## License
 
 OpenRec infrastructure source is licensed under [Apache-2.0](LICENSE). Upstream images and bundled third-party software retain their own licenses.
+
+## Optional embedding inference
+
+The `vllm` component has its own [Dockerfile and configuration](vllm/README.md).
+Use `platform.sh build/up/smoke vllm` with a configured local model mount and GPU.
+It is not part of the default standalone/cluster dependency closure.

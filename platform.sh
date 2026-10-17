@@ -23,7 +23,7 @@ set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch monitoring)
+readonly COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch monitoring vllm)
 readonly STANDALONE_COMPONENTS=(redis elasticsearch monitoring)
 readonly CLUSTER_COMPONENTS=(zookeeper kafka hdfs yarn hive hbase spark flink airflow redis elasticsearch monitoring)
 
@@ -46,7 +46,7 @@ note() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 # command uses the same closure.
 profiles_for() {
   case "$1" in
-    zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|monitoring)
+    zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|monitoring|vllm)
       echo "$1"
       ;;
     *)         die "unknown component '$1' (valid: ${COMPONENTS[*]} all)" ;;
@@ -72,6 +72,7 @@ dependency_components_for() {
       redis)         echo "redis" ;;
       elasticsearch) echo "elasticsearch" ;;
       monitoring)    echo "monitoring" ;;
+      vllm)          echo "vllm" ;;
       *)             die "unknown component '$component' (valid: ${COMPONENTS[*]})" ;;
     esac
   done | awk '!seen[$0]++'
@@ -84,7 +85,7 @@ validate_components() {
   local component
   for component in "$@"; do
     case "$component" in
-      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|monitoring|all) ;;
+      zookeeper|kafka|hdfs|yarn|hive|hbase|spark|flink|airflow|redis|elasticsearch|monitoring|vllm|all) ;;
       *) die "unknown component '$component' (valid: ${COMPONENTS[*]} all)" ;;
     esac
   done
@@ -162,6 +163,7 @@ build_targets() {
     airflow)       echo "" ;;
     redis)         echo "redis" ;;
     elasticsearch) echo "elasticsearch" ;;
+    vllm)          echo "vllm" ;;
     *)             echo "" ;;
   esac
 }
@@ -419,6 +421,10 @@ smoke_elasticsearch() {
     bash -c '! curl -sf --cacert config/certs/ca/ca.crt https://localhost:9200/_cluster/health'
 }
 
+smoke_vllm() {
+  check "vLLM embeddings" compose exec -T vllm python3 /opt/openrec/probe.py embed
+}
+
 smoke_monitoring() {
   check "prometheus ready" compose exec -T prometheus \
     wget -q -O /dev/null http://localhost:9090/-/ready
@@ -464,6 +470,7 @@ component_running() {
     redis) running redis && running redis-exporter ;;
     elasticsearch) running elasticsearch && running elasticsearch-exporter ;;
     monitoring) running prometheus && running grafana ;;
+    vllm) running vllm ;;
     *) die "unknown component '$1'" ;;
   esac
 }

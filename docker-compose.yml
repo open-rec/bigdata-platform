@@ -196,6 +196,46 @@ x-hive-conf: &hive-conf
   - ./hadoop/conf/mapred-site.xml:/opt/hadoop/etc/hadoop/mapred-site.xml:ro
 
 services:
+  vllm:
+    profiles: ["vllm"]
+    build:
+      context: ./vllm
+      args:
+        VLLM_BASE_IMAGE: ${VLLM_BASE_IMAGE:-vllm/vllm-openai:v0.31.0-cu129}
+    image: ${IMAGE_PREFIX:-openrec}/vllm:${VLLM_VERSION:-0.31.0}
+    container_name: vllm
+    hostname: vllm
+    restart: unless-stopped
+    environment:
+      VLLM_MODEL_NAME: ${VLLM_MODEL_NAME:-Qwen/Qwen3-Embedding-0.6B}
+      VLLM_MODEL_PATH: ${VLLM_MODEL_PATH:-}
+      VLLM_API_KEY: ${VLLM_API_KEY:-}
+      VLLM_DTYPE: ${VLLM_DTYPE:-half}
+      VLLM_MAX_MODEL_LEN: ${VLLM_MAX_MODEL_LEN:-512}
+      VLLM_GPU_MEMORY_UTILIZATION: ${VLLM_GPU_MEMORY_UTILIZATION:-0.2}
+      VLLM_MAX_NUM_SEQS: ${VLLM_MAX_NUM_SEQS:-32}
+      VLLM_TENSOR_PARALLEL_SIZE: ${VLLM_TENSOR_PARALLEL_SIZE:-1}
+      VLLM_POOLER_CONFIG: ${VLLM_POOLER_CONFIG:-}
+      VLLM_EMBEDDING_DIMENSIONS: ${VLLM_EMBEDDING_DIMENSIONS:-1024}
+    volumes:
+      - type: bind
+        source: ${VLLM_MODEL_DIR:-./models}
+        target: /models
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "${VLLM_BIND_HOST:-127.0.0.1}:${VLLM_PORT:-8000}:8000"
+    shm_size: ${VLLM_SHM_SIZE:-2gb}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${VLLM_GPU_DEVICE:-0}"]
+              capabilities: [gpu]
+    networks: [openrec-bigdata]
+
 
   # =========================================================================
   # ZooKeeper — profile: zookeeper
