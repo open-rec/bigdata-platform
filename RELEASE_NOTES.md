@@ -1,25 +1,20 @@
-# bigdata-platform v0.1.0
+# bigdata-platform v0.2.0
 
-Released: 2026-10-05
+Released: 2026-10-18
 
-Development and integration infrastructure. First coordinated OpenRec source release.
+Part of the coordinated OpenRec v0.2.0 source release.
 
-## Features
+## Changes since v0.1.0
 
-- Standalone Redis, Elasticsearch, Prometheus and Grafana deployment.
-- Cluster Kafka/ZooKeeper, HDFS/YARN, Hive, HBase, Spark, Flink and Airflow infrastructure.
-- `platform.sh` lifecycle commands with dependency closure and smoke checks.
-- Component-owned images/configuration, monitoring exporters, persistent volumes and configurable resource budgets.
-- Java 21 Spark 4.0.4 and Flink 2.2.1 engines, with independent JVM versions for storage daemons.
+- Add an optional configurable CUDA 12.9 vLLM embedding service.
+- Support reuse of local images for regression runs and document versioned Kafka mutations.
 
 ## Installation and compatibility
 
-Use the matching OpenRec distribution and application components. The release versions the infrastructure source/configuration; upstream service image versions remain independent.
+Standalone and cluster retain distinct dependency closures. Use platform.sh for lifecycle operations. vLLM is optional and must match the title-vector encoder and dimensions. Preserve persistent storage and replace sample credentials for deployment.
 
-The supplied Compose topology is for development and integration. It includes single-point services and sample credentials; it does not provide authenticated production HA. Preserve volumes during routine shutdown. `down -v` deliberately removes data. Build images from this source release; no versioned OCI publication is claimed.
+See the [distribution upgrade and rollback instructions](https://github.com/open-rec/openrec/blob/v0.2.0/RELEASE_NOTES.md) for the complete compatible component set and persisted configuration migrations.
 
-## Validation and known boundaries
+## Validation and publication
 
-See this repository's README for build/test commands and deployment requirements. The coordinated release's [validation record](https://github.com/open-rec/openrec/blob/v0.1.0/release/VALIDATION.md) distinguishes checks executed for this release from historical integration evidence.
-
-This initial release establishes a versioned source baseline. Source archives and checksums are published; external package registries and container registries are not populated by the source-release workflow. Upgrade the complete compatible distribution, retain data/checkpoints/artifacts, and preserve prior component refs for rollback.
+The [validation record](https://github.com/open-rec/openrec/blob/v0.2.0/release/VALIDATION.md) distinguishes release checks from maintainer-reported prior CI and integration results. GitHub Actions publishes source archives and SHA-256 checksums; Maven Central, PyPI and versioned container registries are not populated by this workflow.

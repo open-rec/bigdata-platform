@@ -1,6 +1,6 @@
 # bigdata-platform
 
-[Release v0.1.0](RELEASE_NOTES.md) · [Changelog](CHANGELOG.md)
+[Release v0.2.0](RELEASE_NOTES.md) · [Changelog](CHANGELOG.md)
 
 [![CI](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/open-rec/bigdata-platform/actions/workflows/ci.yml)
 ![Docker Compose](https://img.shields.io/badge/runtime-Docker_Compose-2496ED?logo=docker&logoColor=white)
@@ -345,7 +345,7 @@ Seed the serving layer with the standalone loader:
 
 ```shell
 cd ../openrec
-java -cp init/target/rec-example-init-0.1.0-jar-with-dependencies.jar \
+java -cp init/target/rec-example-init-0.2.0-jar-with-dependencies.jar \
   com.openrec.example.InitServingData standalone 127.0.0.1 6380 127.0.0.1 9200 elastic 'openrec-es-password'
 ```
 
@@ -450,7 +450,7 @@ savepoints use HDFS paths under `/openrec/checkpoints/flink` and `/openrec/savep
 
 ```shell
 ./platform.sh up flink
-docker cp ../data-processor/flink/target/rec-flink-0.1.0.jar \
+docker cp ../data-processor/flink/target/rec-flink-0.2.0.jar \
   flink-jobmanager:/opt/flink/jobs/openrec-features.jar
 docker exec flink-jobmanager flink run -d \
   -c com.openrec.dp.flink.DpJob /opt/flink/jobs/openrec-features.jar
