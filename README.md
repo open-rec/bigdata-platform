@@ -17,7 +17,7 @@ The infrastructure OpenRec runs on, as one Docker Compose project with two peer 
 | `cluster` | ZooKeeper, Kafka, HDFS, YARN, Hive, HBase, Spark, Flink, Airflow, Redis, Elasticsearch, Prometheus, Grafana | distributed ingestion, storage, scheduling, online/offline processing, and observability |
 
 Standalone is the complete small-data mode described by
-[example_standalone](https://github.com/open-rec/openrec/tree/master/example_standalone), not a
+[standalone](https://github.com/open-rec/openrec/tree/master/standalone), not a
 partially started Cluster. Both modes share the serving-store contracts, images, and tooling.
 
 **Each component is its own image, built from its own Dockerfile with its configuration baked in.**
@@ -337,16 +337,16 @@ es.user=elastic
 es.password=openrec-es-password   # must equal ELASTIC_PASSWORD in .env
 ```
 
-The Standalone order is `up standalone` -> run `example/init` -> start `rec-server`. Configure and
+The Standalone order is `up standalone` -> run `openrec/init` -> start `rec-server`. Configure and
 start `rank-engine` only when the graph's rank node is enabled; its Redis endpoint is
 `localhost:6380`.
 
 Seed the serving layer with the standalone loader:
 
 ```shell
-cd ../example
+cd ../openrec
 java -cp init/target/rec-example-init-0.1.0-jar-with-dependencies.jar \
-  com.openrec.example.InitStandalone 127.0.0.1 6380 127.0.0.1 9200 elastic 'openrec-es-password'
+  com.openrec.example.InitServingData standalone 127.0.0.1 6380 127.0.0.1 9200 elastic 'openrec-es-password'
 ```
 
 ## component notes
@@ -468,10 +468,10 @@ Single node on 6379, **no password**, AOF plus RDB persistence, config in `redis
 `maxmemory-policy` come from `.env` as command-line overrides.
 
 No password is a compatibility requirement, not laziness: `rec-server`'s `RedisConfig`,
-`example/init`'s `RedisUtil` and `rank-engine`'s client all connect without credentials, so a
+`openrec/init`'s `RedisUtil` and `rank-engine`'s client all connect without credentials, so a
 `requirepass` here would break all three. Same story for clustering — see the caveats.
 
-This is the store `example/init` seeds and every recommendation request reads. Online entities use
+This is the store `openrec/init` seeds and every recommendation request reads. Online entities use
 `item:{itemId}` and `user:{userId}` strings; behavior uses
 `event:{userId}:{scene}:{type}` sorted sets; development recall tables use
 `i2i:{itemId}:{scene}`, `hot:{scene}`, and `new:{scene}` sorted sets:
@@ -489,7 +489,7 @@ Single node on 9200 holding the per-scene vector index `EmbeddingNode` kNN-searc
 `rec-server`'s `RecallStore` section.
 
 **TLS and auth are on**, because the clients demand it: `EsConfig` (rec-server) and `EsUtil`
-(example/init) both hardcode the `https` scheme and always send basic auth. They also call
+(openrec/init) both hardcode the `https` scheme and always send basic auth. They also call
 `withUnsafeTrustMaterial()`, so a self-signed certificate is fine and the CA never has to leave the
 container.
 
@@ -517,7 +517,7 @@ Everything stateful is in named volumes: `namenode-data`, `datanode-data-{1,2}`,
 destroys them.
 
 Deleting `elastic-certs` is safe — the elasticsearch image regenerates the CA and node certificate on
-the next start. Deleting `redis-data` means re-running `example/init` to reseed the serving layer.
+the next start. Deleting `redis-data` means re-running `openrec/init` to reseed the serving layer.
 
 To reset a single component, remove its volumes explicitly, e.g. for HDFS:
 
@@ -590,8 +590,7 @@ Do not inject the old Hadoop 2 uber jar or Flink 1.14 RocksDB/JNI jars.
 
 Building new images does not migrate running streaming state. Before recreating an existing
 engine cluster, stop submissions, drain jobs, preserve old images and back up checkpoints.
-Do not let two engines write the same checkpoint. Follow the distribution
-[rollout and rollback procedure](https://github.com/open-rec/openrec/blob/master/docs/java21-processors-web-migration.md).
+Do not let two engines write the same checkpoint.
 
 ## License
 
@@ -602,3 +601,7 @@ OpenRec infrastructure source is licensed under [Apache-2.0](LICENSE). Upstream 
 The `vllm` component has its own [Dockerfile and configuration](vllm/README.md).
 Use `platform.sh build/up/smoke vllm` with a configured local model mount and GPU.
 It is not part of the default standalone/cluster dependency closure.
+
+For local source regression, `OPENREC_REUSE_IMAGES=true ./platform.sh up cluster`
+(or `standalone`) uses `--no-build --pull never`. All required images must already exist.
+The OpenRec distribution's `--reuse-images` launcher sets this automatically.

@@ -3,7 +3,7 @@
 # self-signed certificate it generates for itself on first start.
 #
 # TLS and auth are on because the clients require them: rec-server's EsConfig
-# and example/init's EsUtil both hardcode the https scheme and always send
+# and openrec/init's EsUtil both hardcode the https scheme and always send
 # basic auth. Both also call withUnsafeTrustMaterial(), so a self-signed cert
 # is fine and the CA never has to leave the container.
 #

@@ -195,7 +195,11 @@ cmd_up() {
   # containers first; named volumes and all persisted data remain untouched,
   # while running services are deliberately left alone.
   compose_for "${components[*]}" rm -f
-  compose_for "${components[*]}" up -d
+  if [[ "${OPENREC_REUSE_IMAGES:-false}" == true ]]; then
+    compose_for "${components[*]}" up -d --no-build --pull never
+  else
+    compose_for "${components[*]}" up -d
+  fi
   note "state"
   compose ps
   cat <<'EOF'
